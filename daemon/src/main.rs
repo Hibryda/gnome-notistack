@@ -9,6 +9,7 @@
 
 mod a11y;
 mod bus;
+mod cli;
 mod config;
 mod dbus;
 mod error;
@@ -26,14 +27,20 @@ use anyhow::Context;
 use tracing::{error, info};
 
 fn main() -> anyhow::Result<()> {
+    use clap::Parser;
     init_tracing();
 
-    // Standalone visual smoke test for M2 rendering (no D-Bus takeover needed).
-    if std::env::args().any(|a| a == "--demo-popup") {
-        return render::demo();
+    // Precedence: defaults < config file < CLI flags.
+    let cli = cli::Cli::parse();
+    let mut config =
+        config::Config::load_from(cli.config.as_deref()).context("loading configuration")?;
+    cli.apply_to(&mut config);
+
+    // Standalone visual smoke test (no D-Bus takeover needed).
+    if cli.demo_popup {
+        return render::demo(&config);
     }
 
-    let config = config::Config::load().context("loading configuration")?;
     info!(?config, "gnome-notistack starting");
 
     let runtime = tokio::runtime::Builder::new_multi_thread()

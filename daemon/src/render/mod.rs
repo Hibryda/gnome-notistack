@@ -52,18 +52,21 @@ pub enum RenderMode {
     ImageSurface,
 }
 
-/// Standalone visual smoke test (M2): render one ARGB override-redirect popup at
-/// the top-right of the primary monitor, hold it briefly, then exit. Invoked via
-/// `gnome-notistack --demo-popup`. Needs no D-Bus takeover.
-pub fn demo() -> Result<()> {
+/// Standalone visual smoke test: render one ARGB override-redirect popup at the
+/// top-right of the primary monitor (using the configured font/sizes), hold it
+/// briefly, then exit. Invoked via `gnome-notistack --demo-popup`. No D-Bus.
+pub fn demo(config: &crate::config::Config) -> Result<()> {
     let ui = x11::Ui::connect()?;
     let (mx, my, mw, _mh) = ui.primary_geometry()?;
-    let (w, margin) = (400u16, 16i16);
+    let (w, margin) = (config.width_px, config.margin_px as i16);
     let (pixels, stride, h) = cairo::render_card(&cairo::Card {
         summary: "gnome-notistack",
-        body: "M2 demo — ARGB override-redirect popup drawn with cairo + pango.",
+        body: "Demo — ARGB override-redirect popup drawn with cairo + pango.",
         width: w as i32,
         icon: None,
+        font: &config.font_family,
+        summary_pt: config.summary_size_pt,
+        body_pt: config.body_size_pt,
     })?;
     let h = h as u16;
     let x = mx + mw as i16 - w as i16 - margin;

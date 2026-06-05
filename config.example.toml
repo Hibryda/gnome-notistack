@@ -1,0 +1,37 @@
+# gnome-notistack configuration — copy to
+#   $XDG_CONFIG_HOME/gnome-notistack/config.toml   (usually ~/.config/gnome-notistack/config.toml)
+#
+# Every key is optional; omitted keys use the defaults shown here. CLI flags
+# override the config file (precedence: defaults < config file < CLI flags).
+# See `gnome-notistack --help` for the matching flags.
+
+# --- Timing ---------------------------------------------------------------
+# Default popup lifetime for notifications that don't request one (ms).
+default_timeout_ms = 5000          # --default-timeout-ms
+# Lifetime for low-urgency notifications (ms).
+low_urgency_timeout_ms = 3000
+# Fade in/out duration (ms). 0 disables fading (instant show/hide).
+fade_ms = 150                      # --fade-ms
+
+# --- Layout ---------------------------------------------------------------
+# Max simultaneously displayed popups (older ones are dropped past this).
+max_stack = 5                      # --max-stack
+# Popup width (px).
+width_px = 400                     # --width
+# Vertical gap between stacked popups (px).
+gap_px = 10
+# Margin from the top-right screen corner (px).
+margin_px = 16
+
+# --- Text -----------------------------------------------------------------
+# Pango font family for popup text.
+font_family = "Sans"               # --font
+# Summary (title) font size, in points.
+summary_size_pt = 12.0             # --summary-size
+# Body font size, in points.
+body_size_pt = 10.0                # --body-size
+
+# --- Coverage -------------------------------------------------------------
+# Attempt the org.gtk.Notifications takeover (native-GTK/Flatpak apps).
+# Requires the companion extension; false = Fdo-only (partial coverage).
+gtk_takeover = true

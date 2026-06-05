@@ -29,6 +29,17 @@ pub mod reason {
     pub const CLOSED_BY_CALL: u32 = 3;
 }
 
+/// Fade animation state of a popup.
+#[derive(Clone, Copy)]
+enum Fade {
+    /// Fading in: opacity ramps 0→1 from this instant.
+    In(Instant),
+    /// Fully shown.
+    Visible,
+    /// Fading out (opacity 1→0) from this instant; destroyed (with `reason`) when done.
+    Out(Instant, u32),
+}
+
 /// One on-screen popup and its cached pixels (for Expose redraws).
 struct Popup {
     id: NotificationId,
@@ -39,6 +50,7 @@ struct Popup {
     expires_at: Option<Instant>,
     /// The `default` action key, if the notification declared one (whole-card click).
     default_action: Option<String>,
+    fade: Fade,
 }
 
 struct Manager {
@@ -99,6 +111,9 @@ impl Manager {
             body: &n.body,
             width: self.config.width_px as i32,
             icon,
+            font: &self.config.font_family,
+            summary_pt: self.config.summary_size_pt,
+            body_pt: self.config.body_size_pt,
         })?;
         Ok((pixels, stride, height as u16))
     }
@@ -157,8 +172,13 @@ impl Manager {
             .map(|a| a.key.clone());
         let (pixels, stride, height) = self.render_pixels(&n)?;
 
-        // replaces_id / dedup: update in place if the id is already displayed.
-        if let Some(idx) = self.popups.iter().position(|p| p.id == n.id) {
+        // replaces_id / dedup: update in place if the id is already displayed
+        // (and not already fading out).
+        if let Some(idx) = self
+            .popups
+            .iter()
+            .position(|p| p.id == n.id && !matches!(p.fade, Fade::Out(..)))
+        {
             let resize;
             {
                 let p = &mut self.popups[idx];
@@ -198,6 +218,14 @@ impl Manager {
         let x = self.popup_x();
         let y = self.mon.1 + self.config.margin_px as i16;
         let window = self.ui.create_popup(x, y, self.config.width_px, height)?;
+
+        // Start transparent and fade in (if enabled), so the popup doesn't flash.
+        let fade = if self.config.fade_ms > 0 {
+            self.ui.set_opacity(window, 0.0)?;
+            Fade::In(Instant::now())
+        } else {
+            Fade::Visible
+        };
         self.ui.map(window)?;
         self.ui.put_argb(window, height, stride, &pixels)?;
 
@@ -219,6 +247,7 @@ impl Manager {
                 pixels,
                 expires_at,
                 default_action,
+                fade,
             },
         );
         info!(?n.id, app = %n.app_name, count = self.popups.len(), "popup shown");
@@ -240,7 +269,22 @@ impl Manager {
         Ok(())
     }
 
+    /// Begin closing a popup: start its fade-out (or tear down immediately if
+    /// fading is disabled). `advance_fades` finishes faded-out popups.
     fn close(&mut self, id: &NotificationId, reason: u32) -> Result<()> {
+        if self.config.fade_ms == 0 {
+            return self.finish_close(id, reason);
+        }
+        if let Some(p) = self.popups.iter_mut().find(|p| &p.id == id) {
+            if !matches!(p.fade, Fade::Out(..)) {
+                p.fade = Fade::Out(Instant::now(), reason);
+            }
+        }
+        Ok(())
+    }
+
+    /// Tear down a popup: destroy the window, emit `NotificationClosed`, reflow.
+    fn finish_close(&mut self, id: &NotificationId, reason: u32) -> Result<()> {
         if let Some(pos) = self.popups.iter().position(|p| &p.id == id) {
             let p = self.popups.remove(pos);
             self.ui.conn.destroy_window(p.window)?;
@@ -251,6 +295,49 @@ impl Manager {
             self.reflow()?;
         }
         Ok(())
+    }
+
+    /// Advance fade animations one tick: update each popup's opacity and finish
+    /// any whose fade-out has completed.
+    fn advance_fades(&mut self) -> Result<()> {
+        if self.config.fade_ms == 0 {
+            return Ok(());
+        }
+        let dur = Duration::from_millis(self.config.fade_ms).as_secs_f64();
+        let now = Instant::now();
+        let mut done_out: Vec<(NotificationId, u32)> = Vec::new();
+
+        for p in &mut self.popups {
+            match p.fade {
+                Fade::In(start) => {
+                    let t = (now - start).as_secs_f64() / dur;
+                    if t >= 1.0 {
+                        p.fade = Fade::Visible;
+                        self.ui.set_opacity(p.window, 1.0)?;
+                    } else {
+                        self.ui.set_opacity(p.window, t)?;
+                    }
+                }
+                Fade::Out(start, reason) => {
+                    let t = (now - start).as_secs_f64() / dur;
+                    if t >= 1.0 {
+                        done_out.push((p.id.clone(), reason));
+                    } else {
+                        self.ui.set_opacity(p.window, 1.0 - t)?;
+                    }
+                }
+                Fade::Visible => {}
+            }
+        }
+        for (id, reason) in done_out {
+            self.finish_close(&id, reason)?;
+        }
+        Ok(())
+    }
+
+    /// Whether any popup is currently animating (so the loop ticks faster).
+    fn has_active_fades(&self) -> bool {
+        self.config.fade_ms > 0 && self.popups.iter().any(|p| !matches!(p.fade, Fade::Visible))
     }
 
     /// A click on a popup: invoke its default action (if any), then dismiss.
@@ -352,7 +439,10 @@ pub fn run(
             mgr.handle_event(event)?;
         }
         mgr.expire_due()?;
+        mgr.advance_fades()?;
 
-        std::thread::sleep(Duration::from_millis(50));
+        // Tick faster while animating (≈60fps), idle otherwise.
+        let tick = if mgr.has_active_fades() { 16 } else { 50 };
+        std::thread::sleep(Duration::from_millis(tick));
     }
 }

@@ -19,6 +19,16 @@ pub struct Card<'a> {
     pub width: i32,
     /// Optional icon: premultiplied BGRA (cairo ARGB32 order) and its size in px.
     pub icon: Option<(Vec<u8>, i32)>,
+    /// Pango font family.
+    pub font: &'a str,
+    /// Summary / body font sizes, in points.
+    pub summary_pt: f64,
+    pub body_pt: f64,
+}
+
+/// Pango `size` attribute is in 1024ths of a point.
+fn pango_size(pt: f64) -> i32 {
+    (pt * 1024.0).round() as i32
 }
 
 /// Inner padding around the card content, in pixels.
@@ -30,11 +40,14 @@ const MIN_HEIGHT: i32 = 44;
 /// (may exceed `width * 4` due to cairo padding), and the chosen `height`.
 pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32)> {
     // Summary is plain text (escaped); body is FDO markup → Pango markup.
+    let font = crate::markup::escape(card.font);
     let markup = format!(
-        "<span weight='bold' size='12288' foreground='#ffffff'>{}</span>\n\
-         <span size='10240' foreground='#d8d8dc'>{}</span>",
-        crate::markup::escape(card.summary),
-        crate::markup::to_pango(card.body),
+        "<span font_family='{font}' weight='bold' size='{ss}' foreground='#ffffff'>{summary}</span>\n\
+         <span font_family='{font}' size='{bs}' foreground='#d8d8dc'>{body}</span>",
+        ss = pango_size(card.summary_pt),
+        bs = pango_size(card.body_pt),
+        summary = crate::markup::escape(card.summary),
+        body = crate::markup::to_pango(card.body),
     );
     let icon_size = card.icon.as_ref().map(|(_, s)| *s).unwrap_or(0);
     let text_x = PAD + if icon_size > 0 { icon_size + PAD } else { 0 };

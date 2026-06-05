@@ -21,6 +21,14 @@ pub struct Config {
     pub width_px: u16,
     /// Screen-edge margin from the top-right anchor (px).
     pub margin_px: u16,
+    /// Pango font family for popup text (e.g. "Cantarell", "Sans").
+    pub font_family: String,
+    /// Summary (title) font size, in points.
+    pub summary_size_pt: f64,
+    /// Body font size, in points.
+    pub body_size_pt: f64,
+    /// Fade in/out duration, in ms (0 disables fading — instant show/hide).
+    pub fade_ms: u64,
     /// Attempt the `org.gtk.Notifications` takeover (gated by the extension + M0.5 audit).
     /// When false, the daemon runs Fdo-only (partial coverage).
     pub gtk_takeover: bool,
@@ -35,6 +43,10 @@ impl Default for Config {
             gap_px: 10,
             width_px: 400,
             margin_px: 16,
+            font_family: "Sans".to_string(),
+            summary_size_pt: 12.0,
+            body_size_pt: 10.0,
+            fade_ms: 150,
             gtk_takeover: true,
         }
     }
@@ -49,16 +61,28 @@ impl Config {
         Duration::from_millis(self.low_urgency_timeout_ms)
     }
 
-    /// Load config, falling back to defaults when the file is absent (rule 14:
-    /// runnable with zero config). A present-but-invalid file is a hard error.
+    /// Load from the default location, falling back to defaults when absent
+    /// (rule 14: runnable with zero config). A present-but-invalid file is fatal.
     pub fn load() -> anyhow::Result<Self> {
-        match Self::path() {
-            Some(p) if p.exists() => {
+        Self::load_from(None)
+    }
+
+    /// Load config. With an explicit `override_path`, a missing file is a hard
+    /// error; otherwise the default path is used and absence falls back to
+    /// defaults. A present-but-invalid file is always fatal (rule 02).
+    pub fn load_from(override_path: Option<&std::path::Path>) -> anyhow::Result<Self> {
+        let path = match override_path {
+            Some(p) if !p.exists() => anyhow::bail!("config file not found: {}", p.display()),
+            Some(p) => Some(p.to_path_buf()),
+            None => Self::path().filter(|p| p.exists()),
+        };
+        match path {
+            Some(p) => {
                 let text = std::fs::read_to_string(&p)
                     .with_context(|| format!("reading config {}", p.display()))?;
                 toml::from_str(&text).with_context(|| format!("parsing config {}", p.display()))
             }
-            _ => Ok(Self::default()),
+            None => Ok(Self::default()),
         }
     }
 

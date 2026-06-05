@@ -23,6 +23,8 @@ pub struct Ui {
     pub root: Window,
     pub visual_id: Visualid,
     pub colormap: Colormap,
+    /// Cached `_NET_WM_WINDOW_OPACITY` atom (set per-frame during fades).
+    opacity_atom: u32,
 }
 
 impl Ui {
@@ -38,17 +40,37 @@ impl Ui {
         conn.create_colormap(ColormapAlloc::NONE, colormap, root, visual_id)?
             .check()
             .context("create colormap")?;
+        let opacity_atom = conn
+            .intern_atom(false, b"_NET_WM_WINDOW_OPACITY")?
+            .reply()?
+            .atom;
         Ok(Self {
             conn,
             screen_num,
             root,
             visual_id,
             colormap,
+            opacity_atom,
         })
     }
 
     fn intern(&self, name: &[u8]) -> Result<u32> {
         Ok(self.conn.intern_atom(false, name)?.reply()?.atom)
+    }
+
+    /// Set per-window opacity (0.0–1.0) via `_NET_WM_WINDOW_OPACITY`; the
+    /// compositor blends it, so fading is cheap. Used by the fade animation.
+    pub fn set_opacity(&self, win: Window, opacity: f64) -> Result<()> {
+        let value = (opacity.clamp(0.0, 1.0) * u32::MAX as f64) as u32;
+        self.conn.change_property32(
+            PropMode::REPLACE,
+            win,
+            self.opacity_atom,
+            AtomEnum::CARDINAL,
+            &[value],
+        )?;
+        self.conn.flush()?;
+        Ok(())
     }
 
     /// Geometry `(x, y, width, height)` of the primary monitor (first if none is
