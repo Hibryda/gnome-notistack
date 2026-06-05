@@ -8,6 +8,7 @@
 #![allow(dead_code)] // M0 scaffold: stubs are not yet wired into the run loop.
 
 mod a11y;
+mod bus;
 mod config;
 mod dbus;
 mod error;
@@ -39,10 +40,12 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn run(config: config::Config) -> anyhow::Result<()> {
-    // M1+: connect to the session bus, perform queued name acquisition (see
-    // name_watcher), serve the D-Bus interfaces, and spawn the X11 event loop.
-    // M0 simply waits for a shutdown signal so the binary is runnable end-to-end.
-    let _ = &config;
+    // Serve the D-Bus interfaces and queue for the notification name(s). The
+    // companion extension frees the names; D-Bus then promotes us to owner.
+    let _conn = bus::serve(&config).await?;
+    info!("serving D-Bus; queued for the notification name(s) awaiting release");
+
+    // M2+: spawn the X11 event loop and drive the popup stack on name promotion.
     shutdown::wait_for_shutdown().await;
     info!("gnome-notistack shutting down");
     Ok(())
