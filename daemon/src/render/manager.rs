@@ -50,6 +50,10 @@ struct Manager {
     popups: Vec<Popup>,
     /// Back-channel to the async signal emitter (NotificationClosed/ActionInvoked).
     feedback: UnboundedSender<Feedback>,
+    /// DND or screen lock active: queue instead of displaying.
+    suppressed: bool,
+    /// Notifications received while suppressed, replayed on unsuppress (no loss).
+    queued: Vec<Notification>,
 }
 
 impl Manager {
@@ -65,6 +69,8 @@ impl Manager {
             mon,
             popups: Vec::new(),
             feedback,
+            suppressed: false,
+            queued: Vec::new(),
         }
     }
 
@@ -102,7 +108,47 @@ impl Manager {
         let _ = self.feedback.send(fb);
     }
 
+    /// Queue a notification received while suppressed (DND/lock). Bounded to
+    /// `max_stack * 2`, dropping the oldest non-critical entry on overflow.
+    fn enqueue(&mut self, n: Notification) {
+        self.queued.push(n);
+        let cap = self.config.max_stack.saturating_mul(2).max(1);
+        if self.queued.len() > cap {
+            let drop_at = self
+                .queued
+                .iter()
+                .position(|q| q.urgency != Urgency::Critical)
+                .unwrap_or(0);
+            self.queued.remove(drop_at);
+        }
+    }
+
+    /// Enter/leave suppression. On leaving, replay the queued notifications.
+    fn set_suppressed(&mut self, suppressed: bool) -> Result<()> {
+        if self.suppressed == suppressed {
+            return Ok(());
+        }
+        self.suppressed = suppressed;
+        if suppressed {
+            info!("suppressed (DND/lock) — queueing notifications");
+        } else {
+            let queued = std::mem::take(&mut self.queued);
+            info!(
+                count = queued.len(),
+                "unsuppressed — replaying queued notifications"
+            );
+            for n in queued {
+                self.show(n)?;
+            }
+        }
+        Ok(())
+    }
+
     fn show(&mut self, n: Notification) -> Result<()> {
+        if self.suppressed {
+            self.enqueue(n);
+            return Ok(());
+        }
         let expires_at = self.deadline(&n);
         let default_action = n
             .actions
@@ -274,6 +320,11 @@ pub fn run(
                 Ok(Command::Close(id)) => {
                     if let Err(e) = mgr.close(&id, reason::CLOSED_BY_CALL) {
                         warn!(error = %e, "failed to close popup");
+                    }
+                }
+                Ok(Command::SetSuppressed(s)) => {
+                    if let Err(e) = mgr.set_suppressed(s) {
+                        warn!(error = %e, "failed to apply suppression");
                     }
                 }
                 Ok(Command::Shutdown) => {

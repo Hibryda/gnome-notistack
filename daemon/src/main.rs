@@ -20,6 +20,7 @@ mod notification;
 mod render;
 mod shutdown;
 mod sound;
+mod suppression;
 
 use anyhow::Context;
 use tracing::{error, info};
@@ -65,6 +66,9 @@ async fn run(config: config::Config) -> anyhow::Result<()> {
     info!("serving D-Bus; queued for the notification name(s) awaiting release");
 
     spawn_signal_emitter(conn.clone(), fb_rx);
+
+    // Watch DND (gsettings) + screen lock and suppress accordingly.
+    tokio::spawn(suppression::run(conn.clone(), tx.clone()));
 
     shutdown::wait_for_shutdown().await;
     info!("gnome-notistack shutting down");

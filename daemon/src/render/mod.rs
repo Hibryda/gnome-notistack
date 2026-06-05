@@ -23,6 +23,8 @@ pub enum Command {
     Show(Notification),
     /// Dismiss a notification by id (e.g. `CloseNotification`).
     Close(NotificationId),
+    /// Enter/leave suppression (DND or screen lock): queue while true, replay on false.
+    SetSuppressed(bool),
     /// Tear down all popups and stop the render thread.
     Shutdown,
 }
