@@ -6,6 +6,7 @@
 //! plan OBJ-57), and app-exit persistence.
 
 use std::collections::HashMap;
+use tracing::info;
 use zbus::interface;
 use zbus::zvariant::OwnedValue;
 
@@ -22,11 +23,16 @@ impl GtkNotifications {
         id: String,
         notification: HashMap<String, OwnedValue>,
     ) {
-        let _ = (app_id, id, notification); // M7.
+        info!(
+            app_id,
+            id,
+            keys = notification.len(),
+            "GTK AddNotification received"
+        );
     }
 
     /// `RemoveNotification(app_id, id)`. M7.
     fn remove_notification(&self, app_id: String, id: String) {
-        let _ = (app_id, id); // M7.
+        info!(app_id, id, "GTK RemoveNotification received");
     }
 }

@@ -4,6 +4,7 @@
 //! implements behavior (hint decode, `replaces_id`/tombstone, expiry wiring).
 
 use std::collections::HashMap;
+use tracing::info;
 use zbus::interface;
 use zbus::object_server::SignalEmitter;
 use zbus::zvariant::OwnedValue;
@@ -49,23 +50,24 @@ impl FdoNotifications {
         hints: HashMap<String, OwnedValue>,
         expire_timeout: i32,
     ) -> u32 {
-        let _ = (
+        // M1 observability: confirm notifications route to us once we own the name.
+        info!(
             app_name,
             replaces_id,
-            app_icon,
             summary,
-            body,
-            actions,
-            hints,
+            actions = actions.len(),
+            hints = hints.len(),
             expire_timeout,
+            "FDO Notify received"
         );
+        let _ = (app_icon, body);
         // M4: enqueue into the stack and return a real (non-zero) id.
         0
     }
 
     /// Close a notification by id, emitting `NotificationClosed` (reason 3 = by call).
     fn close_notification(&self, id: u32) {
-        let _ = id; // M4.
+        info!(id, "FDO CloseNotification received");
     }
 
     #[zbus(signal)]
