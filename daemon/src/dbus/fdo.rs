@@ -1,17 +1,56 @@
 //! `org.freedesktop.Notifications` — FDO Desktop Notifications spec 1.2.
 //!
-//! M0 declares the full method/signal contract (rule 11: contract first); M4
-//! implements behavior (hint decode, `replaces_id`/tombstone, expiry wiring).
+//! M3 wires `Notify`/`CloseNotification` into the render stack. M4 adds full hint
+//! decode (urgency, image-data), markup translation, tombstone-aware replace, and
+//! the `NotificationClosed`/`ActionInvoked` signal emission.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Instant;
+
+use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
 use zbus::interface;
 use zbus::object_server::SignalEmitter;
 use zbus::zvariant::OwnedValue;
 
-/// State handle for the FDO interface. M3+: shared access to the notification stack.
-#[derive(Default)]
-pub struct FdoNotifications {}
+use crate::notification::{Action, Notification, NotificationId, Urgency};
+use crate::render::Command;
+
+/// Serves the FDO interface; forwards notifications to the render thread.
+pub struct FdoNotifications {
+    tx: UnboundedSender<Command>,
+    next_id: AtomicU32,
+}
+
+impl FdoNotifications {
+    pub fn new(tx: UnboundedSender<Command>) -> Self {
+        // Ids start at 1; 0 is never a valid notification id per the spec.
+        Self {
+            tx,
+            next_id: AtomicU32::new(1),
+        }
+    }
+}
+
+/// Parse the flat FDO `actions` array `[key1, label1, key2, label2, ...]`.
+fn parse_actions(flat: Vec<String>) -> Vec<Action> {
+    flat.chunks_exact(2)
+        .map(|pair| Action {
+            key: pair[0].clone(),
+            label: pair[1].clone(),
+        })
+        .collect()
+}
+
+/// Decode the `urgency` hint (byte 0/1/2); default Normal. M4 decodes more hints.
+fn parse_urgency(hints: &HashMap<String, OwnedValue>) -> Urgency {
+    match hints.get("urgency").and_then(|v| u8::try_from(v).ok()) {
+        Some(0) => Urgency::Low,
+        Some(2) => Urgency::Critical,
+        _ => Urgency::Normal,
+    }
+}
 
 #[interface(name = "org.freedesktop.Notifications")]
 impl FdoNotifications {
@@ -36,8 +75,7 @@ impl FdoNotifications {
         )
     }
 
-    /// `Notify` — returns the server-assigned id (`replaces_id` if non-zero and live).
-    /// M4: full hint decode, tombstone-aware replace, per-notification expiry timer.
+    /// `Notify` — returns the server-assigned id (`replaces_id` if non-zero).
     #[allow(clippy::too_many_arguments)]
     fn notify(
         &self,
@@ -50,24 +88,36 @@ impl FdoNotifications {
         hints: HashMap<String, OwnedValue>,
         expire_timeout: i32,
     ) -> u32 {
-        // M1 observability: confirm notifications route to us once we own the name.
-        info!(
+        let id = if replaces_id != 0 {
+            replaces_id
+        } else {
+            self.next_id.fetch_add(1, Ordering::Relaxed)
+        };
+
+        let notification = Notification {
+            id: NotificationId::Fdo(id),
             app_name,
-            replaces_id,
+            app_icon,
             summary,
-            actions = actions.len(),
-            hints = hints.len(),
-            expire_timeout,
-            "FDO Notify received"
-        );
-        let _ = (app_icon, body);
-        // M4: enqueue into the stack and return a real (non-zero) id.
-        0
+            body,
+            actions: parse_actions(actions),
+            urgency: parse_urgency(&hints),
+            // -1 = use default; 0 = never expire; >0 = explicit ms.
+            expire_timeout_ms: (expire_timeout >= 0).then_some(expire_timeout),
+            created: Instant::now(),
+        };
+
+        info!(id, app = %notification.app_name, summary = %notification.summary, "FDO Notify");
+        if self.tx.send(Command::Show(notification)).is_err() {
+            tracing::warn!("render thread gone; dropping notification");
+        }
+        id
     }
 
-    /// Close a notification by id, emitting `NotificationClosed` (reason 3 = by call).
+    /// Close a notification by id. M4 also emits `NotificationClosed(id, 3)`.
     fn close_notification(&self, id: u32) {
-        info!(id, "FDO CloseNotification received");
+        info!(id, "FDO CloseNotification");
+        let _ = self.tx.send(Command::Close(NotificationId::Fdo(id)));
     }
 
     #[zbus(signal)]

@@ -12,7 +12,6 @@ mod bus;
 mod config;
 mod dbus;
 mod error;
-mod event_loop;
 mod history;
 mod lockscreen;
 mod markup;
@@ -21,10 +20,9 @@ mod notification;
 mod render;
 mod shutdown;
 mod sound;
-mod stack;
 
 use anyhow::Context;
-use tracing::info;
+use tracing::{error, info};
 
 fn main() -> anyhow::Result<()> {
     init_tracing();
@@ -46,14 +44,29 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn run(config: config::Config) -> anyhow::Result<()> {
+    // The render thread owns the (non-Send) X11/cairo state; D-Bus handlers send
+    // it notifications over this channel.
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<render::Command>();
+    let render_config = config.clone();
+    let render_thread = std::thread::Builder::new()
+        .name("notistack-render".into())
+        .spawn(move || {
+            if let Err(e) = render::manager::run(rx, render_config) {
+                error!(error = %e, "render thread exited with error");
+            }
+        })
+        .context("spawning render thread")?;
+
     // Serve the D-Bus interfaces and queue for the notification name(s). The
     // companion extension frees the names; D-Bus then promotes us to owner.
-    let _conn = bus::serve(&config).await?;
+    let _conn = bus::serve(&config, tx.clone()).await?;
     info!("serving D-Bus; queued for the notification name(s) awaiting release");
 
-    // M2+: spawn the X11 event loop and drive the popup stack on name promotion.
     shutdown::wait_for_shutdown().await;
     info!("gnome-notistack shutting down");
+    let _ = tx.send(render::Command::Shutdown);
+    drop(tx);
+    let _ = render_thread.join();
     Ok(())
 }
 

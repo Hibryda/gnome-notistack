@@ -6,6 +6,7 @@
 pub mod assets;
 pub mod cairo;
 pub mod layout;
+pub mod manager;
 pub mod window;
 pub mod x11;
 
@@ -13,6 +14,18 @@ use anyhow::Result;
 use std::time::{Duration, Instant};
 use tracing::info;
 use x11rb::connection::Connection as _;
+
+use crate::notification::{Notification, NotificationId};
+
+/// Messages from the D-Bus handlers (tokio) to the render thread.
+pub enum Command {
+    /// Show a new notification, or update one in place if its id already shows.
+    Show(Notification),
+    /// Dismiss a notification by id (e.g. `CloseNotification`).
+    Close(NotificationId),
+    /// Tear down all popups and stop the render thread.
+    Shutdown,
+}
 
 /// Chosen once at startup by probing (plan risk R5): the cairo XCBSurface fast
 /// path (the one load-bearing unsafe seam) or the safe ImageSurface + put_image
