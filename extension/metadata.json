@@ -1,0 +1,9 @@
+{
+  "uuid": "notistack@hemoglobina.store",
+  "name": "gnome-notistack takeover",
+  "description": "Frees org.freedesktop.Notifications and org.gtk.Notifications so the gnome-notistack daemon can own them (GNOME Shell 48 / X11). Mandatory companion to the daemon — see the project README.",
+  "shell-version": ["48"],
+  "url": "https://git.hemoglobina.store/hibryda/gnome-notistack",
+  "version": 1,
+  "session-modes": ["user"]
+}

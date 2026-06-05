@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.freedesktop.Notifications
+Exec=/usr/lib/gnome-notistack/gnome-notistack
+SystemdService=gnome-notistack.service
