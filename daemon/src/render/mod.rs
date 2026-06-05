@@ -50,17 +50,17 @@ pub enum RenderMode {
 pub fn demo() -> Result<()> {
     let ui = x11::Ui::connect()?;
     let (mx, my, mw, _mh) = ui.primary_geometry()?;
-    let (w, h, margin) = (400u16, 110u16, 16i16);
+    let (w, margin) = (400u16, 16i16);
+    let (pixels, stride, h) = cairo::render_card(&cairo::Card {
+        summary: "gnome-notistack",
+        body: "M2 demo — ARGB override-redirect popup drawn with cairo + pango.",
+        width: w as i32,
+    })?;
+    let h = h as u16;
     let x = mx + mw as i16 - w as i16 - margin;
     let y = my + margin;
 
     let win = ui.create_popup(x, y, w, h)?;
-    let (pixels, stride) = cairo::render_card(&cairo::Card {
-        summary: "gnome-notistack",
-        body: "M2 demo — ARGB override-redirect popup drawn with cairo + pango.",
-        width: w as i32,
-        height: h as i32,
-    })?;
     ui.map(win)?;
     ui.put_argb(win, h, stride, &pixels)?;
     info!(window = win, x, y, w, h, "demo popup mapped");

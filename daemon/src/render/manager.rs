@@ -52,9 +52,6 @@ struct Manager {
     feedback: UnboundedSender<Feedback>,
 }
 
-/// Fixed card height for M3; M4 measures the pango layout for a dynamic height.
-const CARD_HEIGHT: u16 = 92;
-
 impl Manager {
     fn new(
         ui: Ui,
@@ -88,13 +85,14 @@ impl Manager {
         Some(n.created + Duration::from_millis(ms))
     }
 
-    fn render_pixels(&self, n: &Notification) -> Result<(Vec<u8>, i32)> {
-        cairo::render_card(&Card {
+    /// Render a card; returns `(pixels, stride, height)` with content-derived height.
+    fn render_pixels(&self, n: &Notification) -> Result<(Vec<u8>, i32, u16)> {
+        let (pixels, stride, height) = cairo::render_card(&Card {
             summary: &n.summary,
             body: &n.body,
             width: self.config.width_px as i32,
-            height: CARD_HEIGHT as i32,
-        })
+        })?;
+        Ok((pixels, stride, height as u16))
     }
 
     /// Notify clients of a close/action, if this is an FDO notification.
@@ -109,16 +107,30 @@ impl Manager {
             .iter()
             .find(|a| a.key == "default")
             .map(|a| a.key.clone());
-        let (pixels, stride) = self.render_pixels(&n)?;
+        let (pixels, stride, height) = self.render_pixels(&n)?;
 
         // replaces_id / dedup: update in place if the id is already displayed.
-        if let Some(p) = self.popups.iter_mut().find(|p| p.id == n.id) {
-            p.pixels = pixels;
-            p.stride = stride;
-            p.expires_at = expires_at;
-            p.default_action = default_action;
+        if let Some(idx) = self.popups.iter().position(|p| p.id == n.id) {
+            let resize;
+            {
+                let p = &mut self.popups[idx];
+                p.pixels = pixels;
+                p.stride = stride;
+                p.expires_at = expires_at;
+                p.default_action = default_action;
+                resize = p.height != height;
+                p.height = height;
+            }
+            if resize {
+                let win = self.popups[idx].window;
+                self.ui
+                    .conn
+                    .configure_window(win, &ConfigureWindowAux::new().height(height as u32))?;
+            }
+            let p = &self.popups[idx];
             self.ui.put_argb(p.window, p.height, p.stride, &p.pixels)?;
             info!(?n.id, "popup updated in place");
+            self.reflow()?;
             return Ok(());
         }
 
@@ -137,17 +149,15 @@ impl Manager {
 
         let x = self.popup_x();
         let y = self.mon.1 + self.config.margin_px as i16;
-        let window = self
-            .ui
-            .create_popup(x, y, self.config.width_px, CARD_HEIGHT)?;
+        let window = self.ui.create_popup(x, y, self.config.width_px, height)?;
         self.ui.map(window)?;
-        self.ui.put_argb(window, CARD_HEIGHT, stride, &pixels)?;
+        self.ui.put_argb(window, height, stride, &pixels)?;
         self.popups.insert(
             0,
             Popup {
                 id: n.id.clone(),
                 window,
-                height: CARD_HEIGHT,
+                height,
                 stride,
                 pixels,
                 expires_at,
