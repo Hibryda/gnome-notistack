@@ -17,3 +17,6 @@
 
 # Local scratch
 /scratch/
+
+# Tribunal / hypertribunal run artifacts
+.tribunal/
