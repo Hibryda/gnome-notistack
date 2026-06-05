@@ -43,13 +43,23 @@ fn parse_actions(flat: Vec<String>) -> Vec<Action> {
         .collect()
 }
 
-/// Decode the `urgency` hint (byte 0/1/2); default Normal. M4 decodes more hints.
+/// Decode the `urgency` hint (byte 0/1/2); default Normal.
 fn parse_urgency(hints: &HashMap<String, OwnedValue>) -> Urgency {
     match hints.get("urgency").and_then(|v| u8::try_from(v).ok()) {
         Some(0) => Urgency::Low,
         Some(2) => Urgency::Critical,
         _ => Urgency::Normal,
     }
+}
+
+/// Extract the `image-path` (or legacy `image_path`) hint as a string.
+/// M4-remaining: the inline `image-data` `(iiibiiay)` hint.
+fn parse_image_path(hints: &HashMap<String, OwnedValue>) -> Option<String> {
+    hints
+        .get("image-path")
+        .or_else(|| hints.get("image_path"))
+        .and_then(|v| String::try_from(v.clone()).ok())
+        .filter(|s| !s.is_empty())
 }
 
 #[interface(name = "org.freedesktop.Notifications")]
@@ -98,6 +108,7 @@ impl FdoNotifications {
             id: NotificationId::Fdo(id),
             app_name,
             app_icon,
+            image_path: parse_image_path(&hints),
             summary,
             body,
             actions: parse_actions(actions),

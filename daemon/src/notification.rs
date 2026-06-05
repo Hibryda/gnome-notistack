@@ -35,6 +35,8 @@ pub struct Notification {
     pub id: NotificationId,
     pub app_name: String,
     pub app_icon: String,
+    /// `image-path` hint (a file path or `file://` URI), if provided.
+    pub image_path: Option<String>,
     pub summary: String,
     pub body: String,
     pub actions: Vec<Action>,

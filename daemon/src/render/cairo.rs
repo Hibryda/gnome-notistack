@@ -12,11 +12,13 @@
 
 use anyhow::{Context, Result};
 
-/// Content to draw on a popup card. Height is derived from the text.
+/// Content to draw on a popup card. Height is derived from the content.
 pub struct Card<'a> {
     pub summary: &'a str,
     pub body: &'a str,
     pub width: i32,
+    /// Optional icon: premultiplied BGRA (cairo ARGB32 order) and its size in px.
+    pub icon: Option<(Vec<u8>, i32)>,
 }
 
 /// Inner padding around the card content, in pixels.
@@ -34,7 +36,9 @@ pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32)> {
         crate::markup::escape(card.summary),
         crate::markup::to_pango(card.body),
     );
-    let text_width = (card.width - 2 * PAD) * ::pango::SCALE;
+    let icon_size = card.icon.as_ref().map(|(_, s)| *s).unwrap_or(0);
+    let text_x = PAD + if icon_size > 0 { icon_size + PAD } else { 0 };
+    let text_width = (card.width - text_x - PAD) * ::pango::SCALE;
 
     // Measure pass: lay out the text on a throwaway surface to get its height.
     let height = {
@@ -46,7 +50,7 @@ pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32)> {
         layout.set_width(text_width);
         layout.set_wrap(::pango::WrapMode::WordChar);
         let (_, text_h) = layout.pixel_size();
-        (text_h + 2 * PAD).max(MIN_HEIGHT)
+        (text_h.max(icon_size) + 2 * PAD).max(MIN_HEIGHT)
     };
 
     let mut surface = ::cairo::ImageSurface::create(::cairo::Format::ARgb32, card.width, height)
@@ -69,12 +73,29 @@ pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32)> {
         cr.set_line_width(1.0);
         cr.stroke().ok();
 
+        // Icon (vertically centered on the left), if any.
+        if let Some((data, isize)) = &card.icon {
+            let stride = isize * 4; // ARGB32 stride == width*4
+            if let Ok(icon) = ::cairo::ImageSurface::create_for_data(
+                data.clone(),
+                ::cairo::Format::ARgb32,
+                *isize,
+                *isize,
+                stride,
+            ) {
+                let iy = ((height - isize) / 2) as f64;
+                if cr.set_source_surface(&icon, PAD as f64, iy).is_ok() {
+                    cr.paint().ok();
+                }
+            }
+        }
+
         // Text.
         let layout = ::pangocairo::functions::create_layout(&cr);
         layout.set_markup(&markup);
         layout.set_width(text_width);
         layout.set_wrap(::pango::WrapMode::WordChar);
-        cr.move_to(PAD as f64, PAD as f64);
+        cr.move_to(text_x as f64, PAD as f64);
         cr.set_source_rgba(1.0, 1.0, 1.0, 1.0);
         ::pangocairo::functions::show_layout(&cr, &layout);
     }

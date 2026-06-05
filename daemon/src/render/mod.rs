@@ -55,6 +55,7 @@ pub fn demo() -> Result<()> {
         summary: "gnome-notistack",
         body: "M2 demo — ARGB override-redirect popup drawn with cairo + pango.",
         width: w as i32,
+        icon: None,
     })?;
     let h = h as u16;
     let x = mx + mw as i16 - w as i16 - margin;
