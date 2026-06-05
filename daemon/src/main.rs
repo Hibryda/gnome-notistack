@@ -28,6 +28,12 @@ use tracing::info;
 
 fn main() -> anyhow::Result<()> {
     init_tracing();
+
+    // Standalone visual smoke test for M2 rendering (no D-Bus takeover needed).
+    if std::env::args().any(|a| a == "--demo-popup") {
+        return render::demo();
+    }
+
     let config = config::Config::load().context("loading configuration")?;
     info!(?config, "gnome-notistack starting");
 

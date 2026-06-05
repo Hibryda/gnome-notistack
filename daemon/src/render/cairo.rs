@@ -1,6 +1,83 @@
-//! The load-bearing unsafe seam (M2/M4).
+//! Cairo/pango card drawing.
 //!
-//! A cairo `XCBSurface` is created against x11rb's `XCBConnection` raw pointer
-//! (`get_raw_xcb_connection()`). This is the single `unsafe` block in the crate;
-//! it is gated behind a startup probe (`render::window::probe_render_mode`) and
-//! falls back to `ImageSurface` + `put_image` when the probe fails (plan risk R5).
+//! M2 implements the **safe path**: draw onto an `ImageSurface` (ARGB32) and
+//! hand the premultiplied BGRA buffer to `render::x11::Ui::put_argb`. The
+//! load-bearing **unsafe XCBSurface seam** (cairo against x11rb's raw XCB
+//! pointer — the faster path, plan risk R5) is a follow-up optimization gated by
+//! `render::window::probe_render_mode`; the fallback implemented here is always
+//! correct ("naive then optimize", rule 06).
+
+use anyhow::{Context, Result};
+
+/// Content to draw on a popup card.
+pub struct Card<'a> {
+    pub summary: &'a str,
+    pub body: &'a str,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Render a card to premultiplied BGRA (cairo `ARgb32`). Returns `(pixels, stride)`;
+/// `stride` may exceed `width * 4` due to cairo row padding, so callers derive the
+/// put-image width from it.
+pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32)> {
+    let mut surface =
+        ::cairo::ImageSurface::create(::cairo::Format::ARgb32, card.width, card.height)
+            .context("create cairo image surface")?;
+    {
+        let cr = ::cairo::Context::new(&surface).context("create cairo context")?;
+
+        // Start fully transparent so the rounded corners read as alpha=0.
+        cr.set_operator(::cairo::Operator::Source);
+        cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
+        cr.paint().ok();
+        cr.set_operator(::cairo::Operator::Over);
+
+        // Rounded translucent background.
+        let (w, h, r) = (card.width as f64, card.height as f64, 12.0);
+        rounded_rect(&cr, 0.5, 0.5, w - 1.0, h - 1.0, r);
+        cr.set_source_rgba(0.12, 0.12, 0.14, 0.96);
+        cr.fill_preserve().ok();
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.08);
+        cr.set_line_width(1.0);
+        cr.stroke().ok();
+
+        // Text via pango.
+        let layout = ::pangocairo::functions::create_layout(&cr);
+        let markup = format!(
+            "<span weight='bold' size='12288' foreground='#ffffff'>{}</span>\n\
+             <span size='10240' foreground='#d8d8dc'>{}</span>",
+            escape(card.summary),
+            escape(card.body),
+        );
+        layout.set_markup(&markup);
+        layout.set_width((card.width - 32) * ::pango::SCALE);
+        layout.set_wrap(::pango::WrapMode::WordChar);
+        cr.move_to(16.0, 13.0);
+        cr.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+        ::pangocairo::functions::show_layout(&cr, &layout);
+    }
+
+    surface.flush();
+    let stride = surface.stride();
+    let data = surface.data().context("borrow cairo surface data")?;
+    Ok((data.to_vec(), stride))
+}
+
+fn rounded_rect(cr: &::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
+    use std::f64::consts::PI;
+    cr.new_sub_path();
+    cr.arc(x + w - r, y + r, r, -0.5 * PI, 0.0);
+    cr.arc(x + w - r, y + h - r, r, 0.0, 0.5 * PI);
+    cr.arc(x + r, y + h - r, r, 0.5 * PI, PI);
+    cr.arc(x + r, y + r, r, PI, 1.5 * PI);
+    cr.close_path();
+}
+
+/// Minimal Pango-markup escaping for the demo. M4's `markup.rs` does the full
+/// FDO-body → Pango translation.
+fn escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
