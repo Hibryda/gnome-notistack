@@ -85,6 +85,7 @@ fn spawn_signal_emitter(
 ) {
     use zbus::object_server::SignalEmitter;
 
+    let sound_backend = sound::detect();
     tokio::spawn(async move {
         let emitter = match SignalEmitter::new(&conn, dbus::FDO_PATH) {
             Ok(e) => e,
@@ -94,16 +95,30 @@ fn spawn_signal_emitter(
             }
         };
         while let Some(fb) = fb_rx.recv().await {
-            let result = match fb {
+            match fb {
                 render::Feedback::Closed { id, reason } => {
-                    dbus::fdo::emit_closed(&emitter, id, reason).await
+                    if let Err(e) = dbus::fdo::emit_closed(&emitter, id, reason).await {
+                        error!(error = %e, "failed to emit NotificationClosed");
+                    }
                 }
                 render::Feedback::Action { id, key } => {
-                    dbus::fdo::emit_action(&emitter, id, key).await
+                    if let Err(e) = dbus::fdo::emit_action(&emitter, id, key).await {
+                        error!(error = %e, "failed to emit ActionInvoked");
+                    }
                 }
-            };
-            if let Err(e) = result {
-                error!(error = %e, "failed to emit FDO signal");
+                render::Feedback::PlaySound { file, name } => {
+                    if let Some((prog, args)) =
+                        sound::play_command(sound_backend, file.as_deref(), name.as_deref())
+                    {
+                        // Fire-and-forget; tokio reaps the dropped child.
+                        let _ = tokio::process::Command::new(prog)
+                            .args(args)
+                            .stdin(std::process::Stdio::null())
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null())
+                            .spawn();
+                    }
+                }
             }
         }
     });

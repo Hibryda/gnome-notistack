@@ -41,6 +41,12 @@ pub struct Notification {
     pub body: String,
     pub actions: Vec<Action>,
     pub urgency: Urgency,
+    /// `sound-file` hint (a path to an audio file), if provided.
+    pub sound_file: Option<String>,
+    /// `sound-name` hint (a themed sound name), if provided.
+    pub sound_name: Option<String>,
+    /// `suppress-sound` hint: caller asked for no sound.
+    pub suppress_sound: bool,
     /// `None` = use the config default; `Some(0)` = never expire (sticky/critical).
     pub expire_timeout_ms: Option<i32>,
     pub created: Instant,

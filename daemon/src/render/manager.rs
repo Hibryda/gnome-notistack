@@ -200,6 +200,15 @@ impl Manager {
         let window = self.ui.create_popup(x, y, self.config.width_px, height)?;
         self.ui.map(window)?;
         self.ui.put_argb(window, height, stride, &pixels)?;
+
+        // Best-effort sound on display (so DND/queued notifications stay silent).
+        if !n.suppress_sound && (n.sound_file.is_some() || n.sound_name.is_some()) {
+            self.emit(Feedback::PlaySound {
+                file: n.sound_file.clone(),
+                name: n.sound_name.clone(),
+            });
+        }
+
         self.popups.insert(
             0,
             Popup {
@@ -313,7 +322,7 @@ pub fn run(
         loop {
             match rx.try_recv() {
                 Ok(Command::Show(n)) => {
-                    if let Err(e) = mgr.show(n) {
+                    if let Err(e) = mgr.show(*n) {
                         warn!(error = %e, "failed to show popup");
                     }
                 }

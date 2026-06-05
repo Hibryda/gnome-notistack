@@ -20,7 +20,8 @@ use crate::notification::{Notification, NotificationId};
 /// Messages from the D-Bus handlers (tokio) to the render thread.
 pub enum Command {
     /// Show a new notification, or update one in place if its id already shows.
-    Show(Notification),
+    /// Boxed: `Notification` is much larger than the other variants.
+    Show(Box<Notification>),
     /// Dismiss a notification by id (e.g. `CloseNotification`).
     Close(NotificationId),
     /// Enter/leave suppression (DND or screen lock): queue while true, replay on false.
@@ -35,6 +36,11 @@ pub enum Feedback {
     Closed { id: u32, reason: u32 },
     /// Emit `ActionInvoked(id, key)`.
     Action { id: u32, key: String },
+    /// Play a notification sound (best-effort), by file path or themed name.
+    PlaySound {
+        file: Option<String>,
+        name: Option<String>,
+    },
 }
 
 /// Chosen once at startup by probing (plan risk R5): the cairo XCBSurface fast

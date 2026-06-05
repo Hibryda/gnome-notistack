@@ -62,6 +62,14 @@ fn parse_image_path(hints: &HashMap<String, OwnedValue>) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Extract a string hint by key, if non-empty.
+fn string_hint(hints: &HashMap<String, OwnedValue>, key: &str) -> Option<String> {
+    hints
+        .get(key)
+        .and_then(|v| String::try_from(v.clone()).ok())
+        .filter(|s| !s.is_empty())
+}
+
 #[interface(name = "org.freedesktop.Notifications")]
 impl FdoNotifications {
     /// Capabilities we advertise. M4: reconcile with actually-implemented features.
@@ -113,13 +121,19 @@ impl FdoNotifications {
             body,
             actions: parse_actions(actions),
             urgency: parse_urgency(&hints),
+            sound_file: string_hint(&hints, "sound-file"),
+            sound_name: string_hint(&hints, "sound-name"),
+            suppress_sound: hints
+                .get("suppress-sound")
+                .and_then(|v| bool::try_from(v).ok())
+                .unwrap_or(false),
             // -1 = use default; 0 = never expire; >0 = explicit ms.
             expire_timeout_ms: (expire_timeout >= 0).then_some(expire_timeout),
             created: Instant::now(),
         };
 
         info!(id, app = %notification.app_name, summary = %notification.summary, "FDO Notify");
-        if self.tx.send(Command::Show(notification)).is_err() {
+        if self.tx.send(Command::Show(Box::new(notification))).is_err() {
             tracing::warn!("render thread gone; dropping notification");
         }
         id
