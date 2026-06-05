@@ -27,6 +27,14 @@ pub enum Command {
     Shutdown,
 }
 
+/// Messages from the render thread back to the async FDO signal emitter.
+pub enum Feedback {
+    /// Emit `NotificationClosed(id, reason)`.
+    Closed { id: u32, reason: u32 },
+    /// Emit `ActionInvoked(id, key)`.
+    Action { id: u32, key: String },
+}
+
 /// Chosen once at startup by probing (plan risk R5): the cairo XCBSurface fast
 /// path (the one load-bearing unsafe seam) or the safe ImageSurface + put_image
 /// fallback. A single decision, not per-window.

@@ -1,15 +1,16 @@
-//! Render thread: owns the X11 connection and the live popup stack (M3).
+//! Render thread: owns the X11 connection and the live popup stack (M3/M4).
 //!
 //! D-Bus handlers (async/tokio) send [`Command`]s over a channel; this thread
-//! (the only owner of the non-`Send` cairo/X11 state) renders. A 50 ms tick loop
-//! interleaves commands, X11 events, and expiry — correct and simple; an
-//! `AsyncFd`/`select!` fast path is a later optimization (rule 06).
+//! (the only owner of the non-`Send` cairo/X11 state) renders. Closures/actions
+//! flow back over a [`Feedback`] channel to an async task that emits the FDO
+//! signals. A 50 ms tick loop interleaves commands, X11 events, and expiry —
+//! correct and simple; an `AsyncFd`/`select!` fast path is a later optimization.
 
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use tokio::sync::mpsc::error::TryRecvError;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{info, warn};
 use x11rb::connection::Connection as _;
 use x11rb::protocol::xproto::{ConfigureWindowAux, ConnectionExt as _, Window};
@@ -17,9 +18,16 @@ use x11rb::protocol::Event;
 
 use super::cairo::{self, Card};
 use super::x11::Ui;
-use super::Command;
+use super::{Command, Feedback};
 use crate::config::Config;
 use crate::notification::{Notification, NotificationId, Urgency};
+
+/// FDO close reasons (org.freedesktop.Notifications spec).
+pub mod reason {
+    pub const EXPIRED: u32 = 1;
+    pub const DISMISSED: u32 = 2;
+    pub const CLOSED_BY_CALL: u32 = 3;
+}
 
 /// One on-screen popup and its cached pixels (for Expose redraws).
 struct Popup {
@@ -29,6 +37,8 @@ struct Popup {
     stride: i32,
     pixels: Vec<u8>,
     expires_at: Option<Instant>,
+    /// The `default` action key, if the notification declared one (whole-card click).
+    default_action: Option<String>,
 }
 
 struct Manager {
@@ -38,18 +48,26 @@ struct Manager {
     mon: (i16, i16, u16, u16),
     /// Newest first.
     popups: Vec<Popup>,
+    /// Back-channel to the async signal emitter (NotificationClosed/ActionInvoked).
+    feedback: UnboundedSender<Feedback>,
 }
 
 /// Fixed card height for M3; M4 measures the pango layout for a dynamic height.
 const CARD_HEIGHT: u16 = 92;
 
 impl Manager {
-    fn new(ui: Ui, config: Config, mon: (i16, i16, u16, u16)) -> Self {
+    fn new(
+        ui: Ui,
+        config: Config,
+        mon: (i16, i16, u16, u16),
+        feedback: UnboundedSender<Feedback>,
+    ) -> Self {
         Self {
             ui,
             config,
             mon,
             popups: Vec::new(),
+            feedback,
         }
     }
 
@@ -79,8 +97,18 @@ impl Manager {
         })
     }
 
+    /// Notify clients of a close/action, if this is an FDO notification.
+    fn emit(&self, fb: Feedback) {
+        let _ = self.feedback.send(fb);
+    }
+
     fn show(&mut self, n: Notification) -> Result<()> {
         let expires_at = self.deadline(&n);
+        let default_action = n
+            .actions
+            .iter()
+            .find(|a| a.key == "default")
+            .map(|a| a.key.clone());
         let (pixels, stride) = self.render_pixels(&n)?;
 
         // replaces_id / dedup: update in place if the id is already displayed.
@@ -88,6 +116,7 @@ impl Manager {
             p.pixels = pixels;
             p.stride = stride;
             p.expires_at = expires_at;
+            p.default_action = default_action;
             self.ui.put_argb(p.window, p.height, p.stride, &p.pixels)?;
             info!(?n.id, "popup updated in place");
             return Ok(());
@@ -97,6 +126,12 @@ impl Manager {
         while self.popups.len() >= self.config.max_stack {
             if let Some(old) = self.popups.pop() {
                 self.ui.conn.destroy_window(old.window)?;
+                if let NotificationId::Fdo(id) = old.id {
+                    self.emit(Feedback::Closed {
+                        id,
+                        reason: reason::EXPIRED,
+                    });
+                }
             }
         }
 
@@ -116,6 +151,7 @@ impl Manager {
                 stride,
                 pixels,
                 expires_at,
+                default_action,
             },
         );
         info!(?n.id, app = %n.app_name, count = self.popups.len(), "popup shown");
@@ -137,20 +173,31 @@ impl Manager {
         Ok(())
     }
 
-    fn close(&mut self, id: &NotificationId) -> Result<()> {
+    fn close(&mut self, id: &NotificationId, reason: u32) -> Result<()> {
         if let Some(pos) = self.popups.iter().position(|p| &p.id == id) {
             let p = self.popups.remove(pos);
             self.ui.conn.destroy_window(p.window)?;
-            info!(?id, "popup closed");
+            if let NotificationId::Fdo(fid) = p.id {
+                self.emit(Feedback::Closed { id: fid, reason });
+            }
+            info!(?id, reason, "popup closed");
             self.reflow()?;
         }
         Ok(())
     }
 
-    fn close_window(&mut self, window: Window) -> Result<()> {
-        if let Some(pos) = self.popups.iter().position(|p| p.window == window) {
-            let id = self.popups[pos].id.clone();
-            return self.close(&id);
+    /// A click on a popup: invoke its default action (if any), then dismiss.
+    fn click_window(&mut self, window: Window) -> Result<()> {
+        let found = self
+            .popups
+            .iter()
+            .find(|p| p.window == window)
+            .map(|p| (p.id.clone(), p.default_action.clone()));
+        if let Some((id, default_action)) = found {
+            if let (NotificationId::Fdo(fid), Some(key)) = (&id, default_action) {
+                self.emit(Feedback::Action { id: *fid, key });
+            }
+            self.close(&id, reason::DISMISSED)?;
         }
         Ok(())
     }
@@ -164,7 +211,7 @@ impl Manager {
             .map(|p| p.id.clone())
             .collect();
         for id in expired {
-            self.close(&id)?;
+            self.close(&id, reason::EXPIRED)?;
         }
         Ok(())
     }
@@ -176,9 +223,9 @@ impl Manager {
                     self.ui.put_argb(p.window, p.height, p.stride, &p.pixels)?;
                 }
             }
-            // M4: hit-test against layout click regions for action dispatch; for
-            // now any click dismisses the clicked popup.
-            Event::ButtonPress(e) => self.close_window(e.event)?,
+            // M4-remaining: hit-test against per-button layout regions; for now a
+            // click invokes the default action (if any) and dismisses.
+            Event::ButtonPress(e) => self.click_window(e.event)?,
             _ => {}
         }
         Ok(())
@@ -194,10 +241,14 @@ impl Manager {
 }
 
 /// Render-thread entry point. Owns the X11 connection for its whole lifetime.
-pub fn run(mut rx: UnboundedReceiver<Command>, config: Config) -> Result<()> {
+pub fn run(
+    mut rx: UnboundedReceiver<Command>,
+    feedback: UnboundedSender<Feedback>,
+    config: Config,
+) -> Result<()> {
     let ui = Ui::connect()?;
     let mon = ui.primary_geometry()?;
-    let mut mgr = Manager::new(ui, config, mon);
+    let mut mgr = Manager::new(ui, config, mon, feedback);
     info!(?mon, "render thread started");
 
     loop {
@@ -209,7 +260,7 @@ pub fn run(mut rx: UnboundedReceiver<Command>, config: Config) -> Result<()> {
                     }
                 }
                 Ok(Command::Close(id)) => {
-                    if let Err(e) = mgr.close(&id) {
+                    if let Err(e) = mgr.close(&id, reason::CLOSED_BY_CALL) {
                         warn!(error = %e, "failed to close popup");
                     }
                 }

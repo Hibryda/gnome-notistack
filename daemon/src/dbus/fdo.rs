@@ -134,3 +134,13 @@ impl FdoNotifications {
         action_key: String,
     ) -> zbus::Result<()>;
 }
+
+/// Public wrappers so the async signal-emitter task (outside the interface impl)
+/// can emit these signals via a `SignalEmitter` bound to the FDO object path.
+pub async fn emit_closed(emitter: &SignalEmitter<'_>, id: u32, reason: u32) -> zbus::Result<()> {
+    FdoNotifications::notification_closed(emitter, id, reason).await
+}
+
+pub async fn emit_action(emitter: &SignalEmitter<'_>, id: u32, key: String) -> zbus::Result<()> {
+    FdoNotifications::action_invoked(emitter, id, key).await
+}

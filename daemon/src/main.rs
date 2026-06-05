@@ -44,14 +44,16 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn run(config: config::Config) -> anyhow::Result<()> {
-    // The render thread owns the (non-Send) X11/cairo state; D-Bus handlers send
-    // it notifications over this channel.
+    // Forward channel: D-Bus handlers -> render thread (notifications to show).
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<render::Command>();
+    // Feedback channel: render thread -> async signal emitter (closes/actions).
+    let (fb_tx, fb_rx) = tokio::sync::mpsc::unbounded_channel::<render::Feedback>();
+
     let render_config = config.clone();
     let render_thread = std::thread::Builder::new()
         .name("notistack-render".into())
         .spawn(move || {
-            if let Err(e) = render::manager::run(rx, render_config) {
+            if let Err(e) = render::manager::run(rx, fb_tx, render_config) {
                 error!(error = %e, "render thread exited with error");
             }
         })
@@ -59,8 +61,10 @@ async fn run(config: config::Config) -> anyhow::Result<()> {
 
     // Serve the D-Bus interfaces and queue for the notification name(s). The
     // companion extension frees the names; D-Bus then promotes us to owner.
-    let _conn = bus::serve(&config, tx.clone()).await?;
+    let conn = bus::serve(&config, tx.clone()).await?;
     info!("serving D-Bus; queued for the notification name(s) awaiting release");
+
+    spawn_signal_emitter(conn.clone(), fb_rx);
 
     shutdown::wait_for_shutdown().await;
     info!("gnome-notistack shutting down");
@@ -68,6 +72,37 @@ async fn run(config: config::Config) -> anyhow::Result<()> {
     drop(tx);
     let _ = render_thread.join();
     Ok(())
+}
+
+/// Drain the feedback channel and emit the matching FDO signals on the session bus.
+fn spawn_signal_emitter(
+    conn: zbus::Connection,
+    mut fb_rx: tokio::sync::mpsc::UnboundedReceiver<render::Feedback>,
+) {
+    use zbus::object_server::SignalEmitter;
+
+    tokio::spawn(async move {
+        let emitter = match SignalEmitter::new(&conn, dbus::FDO_PATH) {
+            Ok(e) => e,
+            Err(e) => {
+                error!(error = %e, "failed to build FDO signal emitter");
+                return;
+            }
+        };
+        while let Some(fb) = fb_rx.recv().await {
+            let result = match fb {
+                render::Feedback::Closed { id, reason } => {
+                    dbus::fdo::emit_closed(&emitter, id, reason).await
+                }
+                render::Feedback::Action { id, key } => {
+                    dbus::fdo::emit_action(&emitter, id, key).await
+                }
+            };
+            if let Err(e) = result {
+                error!(error = %e, "failed to emit FDO signal");
+            }
+        }
+    });
 }
 
 fn init_tracing() {
