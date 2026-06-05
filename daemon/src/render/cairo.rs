@@ -44,11 +44,12 @@ pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32)> {
 
         // Text via pango.
         let layout = ::pangocairo::functions::create_layout(&cr);
+        // Summary is plain text (escaped); body is FDO markup → Pango markup.
         let markup = format!(
             "<span weight='bold' size='12288' foreground='#ffffff'>{}</span>\n\
              <span size='10240' foreground='#d8d8dc'>{}</span>",
-            escape(card.summary),
-            escape(card.body),
+            crate::markup::escape(card.summary),
+            crate::markup::to_pango(card.body),
         );
         layout.set_markup(&markup);
         layout.set_width((card.width - 32) * ::pango::SCALE);
@@ -72,12 +73,4 @@ fn rounded_rect(cr: &::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
     cr.arc(x + r, y + h - r, r, 0.5 * PI, PI);
     cr.arc(x + r, y + r, r, PI, 1.5 * PI);
     cr.close_path();
-}
-
-/// Minimal Pango-markup escaping for the demo. M4's `markup.rs` does the full
-/// FDO-body → Pango translation.
-fn escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
