@@ -43,6 +43,8 @@ pub enum Feedback {
     },
     /// Invoke a GTK notification's default action via `org.freedesktop.Application`.
     GtkActivate { app_id: String, action: String },
+    /// Open a body hyperlink (clicked `<a href>`) in the default browser.
+    OpenUrl(String),
 }
 
 /// Chosen once at startup by probing (plan risk R5): the cairo XCBSurface fast
@@ -62,15 +64,24 @@ pub enum RenderMode {
 pub fn demo(config: &crate::config::Config) -> Result<()> {
     let ui = x11::Ui::connect()?;
     let (mx, my, mw, _mh) = ui.primary_geometry()?;
-    let (w, margin) = (config.width_px, config.margin_px as i16);
-    let (pixels, stride, h) = cairo::render_card(&cairo::Card {
+    let w: u16 = if config.width_px > 0 {
+        config.width_px
+    } else {
+        400
+    };
+    let margin = config.margin_px as i16;
+    let (pixels, stride, h, _regions) = cairo::render_card(&cairo::Card {
         summary: "gnome-notistack",
         body: "Demo — ARGB override-redirect popup drawn with cairo + pango.",
         width: w as i32,
         icon: None,
+        inline_images: &[],
+        buttons: &[],
+        links: &[],
         font: &config.font_family,
         summary_pt: config.summary_size_pt,
         body_pt: config.body_size_pt,
+        title_body_gap: config.title_body_gap_px as i32,
         bg: config.bg,
         fg: config.fg,
     })?;

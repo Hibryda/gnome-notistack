@@ -106,6 +106,23 @@ async fn activate_gtk_action(conn: &zbus::Connection, app_id: &str, action: &str
     }
 }
 
+/// Open a body hyperlink via `xdg-open`, restricted to safe web/mail schemes so a
+/// notification can't trigger `file://` or arbitrary scheme handlers (rule 01).
+fn open_url(url: &str) {
+    let ok =
+        url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:");
+    if !ok {
+        error!(url, "refusing to open non-web URL from a notification");
+        return;
+    }
+    let _ = std::process::Command::new("xdg-open")
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
 /// Drain the feedback channel and emit the matching FDO signals on the session bus.
 fn spawn_signal_emitter(
     conn: zbus::Connection,
@@ -150,6 +167,7 @@ fn spawn_signal_emitter(
                 render::Feedback::GtkActivate { app_id, action } => {
                     activate_gtk_action(&conn, &app_id, &action).await;
                 }
+                render::Feedback::OpenUrl(url) => open_url(&url),
             }
         }
     });

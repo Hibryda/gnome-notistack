@@ -127,6 +127,54 @@ fn raw_to_bgra(raw: &RawImage, size: u32) -> Option<(Vec<u8>, i32)> {
     Some((data, size as i32))
 }
 
+/// Decode an inline `<img>` source, aspect-preserved to fit `max_w`×`max_h`.
+/// Returns premultiplied BGRA + actual `(w, h)`. Local paths / `file://` only.
+pub fn load_image(src: &str, max_w: u32, max_h: u32) -> Option<(Vec<u8>, i32, i32)> {
+    let path = file_path(src)?;
+    let is_svg = matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some("svg") | Some("svgz")
+    );
+    if is_svg {
+        let bytes = std::fs::read(&path).ok()?;
+        let tree = usvg::Tree::from_data(&bytes, &usvg::Options::default()).ok()?;
+        let ts = tree.size();
+        let scale = (max_w as f32 / ts.width()).min(max_h as f32 / ts.height());
+        let w = ((ts.width() * scale).round() as u32).max(1);
+        let h = ((ts.height() * scale).round() as u32).max(1);
+        let mut pixmap = tiny_skia::Pixmap::new(w, h)?;
+        resvg::render(
+            &tree,
+            tiny_skia::Transform::from_scale(scale, scale),
+            &mut pixmap.as_mut(),
+        );
+        let mut data = pixmap.data().to_vec();
+        for px in data.chunks_exact_mut(4) {
+            px.swap(0, 2);
+        }
+        return Some((data, w as i32, h as i32));
+    }
+    let img = match image::open(&path) {
+        Ok(i) => i,
+        Err(e) => {
+            debug!(path = %path.display(), error = %e, "inline image decode failed");
+            return None;
+        }
+    };
+    let (ow, oh) = (img.width().max(1), img.height().max(1));
+    let scale = (max_w as f32 / ow as f32)
+        .min(max_h as f32 / oh as f32)
+        .min(1.0);
+    let w = ((ow as f32 * scale).round() as u32).max(1);
+    let h = ((oh as f32 * scale).round() as u32).max(1);
+    let mut data = img
+        .resize_exact(w, h, FilterType::Lanczos3)
+        .to_rgba8()
+        .into_raw();
+    premultiply_bgra(&mut data);
+    Some((data, w as i32, h as i32))
+}
+
 /// Treat a string as a filesystem path (stripping `file://`); existing files only.
 fn file_path(s: &str) -> Option<PathBuf> {
     let p = s.strip_prefix("file://").unwrap_or(s);

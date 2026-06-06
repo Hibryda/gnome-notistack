@@ -15,7 +15,7 @@ use tracing::info;
 use zbus::interface;
 use zbus::zvariant::OwnedValue;
 
-use crate::notification::{Notification, NotificationId, Urgency};
+use crate::notification::{Action, Notification, NotificationId, Urgency};
 use crate::render::Command;
 
 pub struct GtkNotifications {
@@ -30,6 +30,25 @@ impl GtkNotifications {
 
 fn str_field(map: &HashMap<String, OwnedValue>, key: &str) -> Option<String> {
     map.get(key).and_then(|v| String::try_from(v.clone()).ok())
+}
+
+/// Parse the GTK `buttons` array (`aa{sv}` of `label`/`action`/`target`) into
+/// action buttons. The `action` is an `app.`-prefixed name dispatched on click.
+fn parse_buttons(map: &HashMap<String, OwnedValue>) -> Vec<Action> {
+    let Some(v) = map.get("buttons") else {
+        return Vec::new();
+    };
+    let Ok(arr) = Vec::<HashMap<String, OwnedValue>>::try_from(v.clone()) else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|b| {
+            Some(Action {
+                key: str_field(b, "action")?,
+                label: str_field(b, "label")?,
+            })
+        })
+        .collect()
 }
 
 #[interface(name = "org.gtk.Notifications")]
@@ -60,9 +79,8 @@ impl GtkNotifications {
             image_data: None,
             summary: str_field(&notification, "title").unwrap_or_default(),
             body: str_field(&notification, "body").unwrap_or_default(),
-            actions: Vec::new(),
-            // Whole-card click invokes the GTK default-action (M7.1). Buttons
-            // are parsed/rendered in a later pass.
+            actions: parse_buttons(&notification),
+            // Whole-card click invokes the GTK default-action.
             default_action: str_field(&notification, "default-action"),
             urgency,
             sound_file: None,

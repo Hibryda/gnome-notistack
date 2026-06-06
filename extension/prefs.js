@@ -5,6 +5,7 @@
 // is structural and takes effect on the next daemon start.
 
 import Adw from 'gi://Adw';
+import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
 import Gtk from 'gi://Gtk';
 
@@ -46,6 +47,34 @@ function addEntry(group, settings, key, title) {
     return row;
 }
 
+function addMonitorCombo(group, settings) {
+    const options = [['primary', 'Primary (follow)']];
+    try {
+        const monitors = Gdk.Display.get_default()?.get_monitors();
+        const n = monitors?.get_n_items() ?? 0;
+        for (let i = 0; i < n; i++) {
+            const m = monitors.get_item(i);
+            const conn = m.get_connector?.() || `monitor-${i}`;
+            const desc = m.get_description?.() || '';
+            options.push([conn, desc && desc !== conn ? `${conn} — ${desc}` : conn]);
+        }
+    } catch (_e) {
+        // No display (rare in prefs); the Primary option still works.
+    }
+    const model = new Gtk.StringList();
+    options.forEach(([, label]) => model.append(label));
+    const keys = options.map(([k]) => k);
+    const row = new Adw.ComboRow({ title: 'Monitor', model });
+    const sync = () => {
+        const i = keys.indexOf(settings.get_string('monitor'));
+        row.set_selected(i >= 0 ? i : 0);
+    };
+    sync();
+    row.connect('notify::selected', () => settings.set_string('monitor', keys[row.get_selected()]));
+    settings.connect('changed::monitor', sync);
+    group.add(row);
+}
+
 function addThemeCombo(group, settings) {
     const options = [['auto', 'Follow system'], ['light', 'Light'], ['dark', 'Dark']];
     const model = new Gtk.StringList();
@@ -76,6 +105,8 @@ export default class NotistackPreferences extends ExtensionPreferences {
             { lower: 0, upper: 72, step: 1, digits: 0, isDouble: true });
         addSpin(appearance, settings, 'body-size-pt', 'Body size (pt, 0 = from system font)',
             { lower: 0, upper: 72, step: 1, digits: 0, isDouble: true });
+        addSpin(appearance, settings, 'title-body-gap-px', 'Gap between title and body (px)',
+            { lower: 0, upper: 60, step: 1 });
 
         // --- Layout ---
         const layout = new Adw.PreferencesGroup({
@@ -83,6 +114,7 @@ export default class NotistackPreferences extends ExtensionPreferences {
             description: 'Width derives from the monitor unless an absolute width is set.',
         });
         page.add(layout);
+        addMonitorCombo(layout, settings);
         addSpin(layout, settings, 'width-px', 'Width (px, 0 = automatic)',
             { lower: 0, upper: 4000, step: 10 });
         addSpin(layout, settings, 'width-height-fraction', 'Width as fraction of monitor height',

@@ -164,6 +164,46 @@ impl Ui {
         Ok((0, 0, screen.width_in_pixels, screen.height_in_pixels))
     }
 
+    /// Resolve the RandR connector name of a monitor (e.g. "DP-1") from its atom.
+    fn monitor_name(&self, atom: u32) -> String {
+        self.conn
+            .get_atom_name(atom)
+            .ok()
+            .and_then(|c| c.reply().ok())
+            .map(|r| String::from_utf8_lossy(&r.name).into_owned())
+            .unwrap_or_default()
+    }
+
+    /// Connected monitors as `(name, x, y, w, h)` — for the prefs dropdown / lookup.
+    pub fn list_monitors(&self) -> Vec<(String, i16, i16, u16, u16)> {
+        let mut out = Vec::new();
+        if let Ok(cookie) = self.conn.randr_get_monitors(self.root, true) {
+            if let Ok(reply) = cookie.reply() {
+                for m in &reply.monitors {
+                    out.push((self.monitor_name(m.name), m.x, m.y, m.width, m.height));
+                }
+            }
+        }
+        out
+    }
+
+    /// Geometry of the named monitor ("primary"/empty → primary), falling back to
+    /// the primary monitor if the named connector isn't present.
+    pub fn monitor_geometry(&self, name: &str) -> Result<(i16, i16, u16, u16)> {
+        if name != "primary" && !name.is_empty() {
+            if let Ok(reply) = self.conn.randr_get_monitors(self.root, true)?.reply() {
+                if let Some(m) = reply
+                    .monitors
+                    .iter()
+                    .find(|m| self.monitor_name(m.name) == name)
+                {
+                    return Ok((m.x, m.y, m.width, m.height));
+                }
+            }
+        }
+        self.primary_geometry()
+    }
+
     /// Create (unmapped) an ARGB32 override-redirect popup with EWMH hints set.
     pub fn create_popup(&self, x: i16, y: i16, w: u16, h: u16) -> Result<Window> {
         let win = self.conn.generate_id().context("generate window id")?;

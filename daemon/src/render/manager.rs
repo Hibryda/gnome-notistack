@@ -16,7 +16,7 @@ use x11rb::connection::Connection as _;
 use x11rb::protocol::xproto::{ConfigureWindowAux, ConnectionExt as _, Window};
 use x11rb::protocol::Event;
 
-use super::cairo::{self, Card};
+use super::cairo::{self, Card, Region, RegionKind};
 use super::x11::Ui;
 use super::{Command, Feedback};
 use crate::config::Config;
@@ -55,6 +55,8 @@ struct Popup {
     /// The source notification, kept so the card can be re-rendered on a live
     /// config change (font/colors/width).
     notification: Notification,
+    /// Clickable regions (buttons + links) in window-local pixels.
+    regions: Vec<Region>,
 }
 
 struct Manager {
@@ -124,10 +126,15 @@ impl Manager {
         }
         info!("config changed — applying live");
         self.config = new;
+        // The target monitor may have changed.
+        self.mon = self
+            .ui
+            .monitor_geometry(&self.config.monitor)
+            .unwrap_or(self.mon);
         // Re-render every popup with the new font/colors/width.
         for i in 0..self.popups.len() {
             let n = self.popups[i].notification.clone();
-            let (pixels, stride, height) = self.render_pixels(&n)?;
+            let (pixels, stride, height, regions) = self.render_pixels(&n)?;
             let win = self.popups[i].window;
             let w = self.popup_width() as u32;
             self.ui.conn.configure_window(
@@ -139,6 +146,7 @@ impl Manager {
             p.pixels = pixels;
             p.stride = stride;
             p.height = height;
+            p.regions = regions;
         }
         self.reflow()
     }
@@ -226,26 +234,44 @@ impl Manager {
         Some(n.created + dur)
     }
 
-    /// Render a card; returns `(pixels, stride, height)` with content-derived height.
-    fn render_pixels(&self, n: &Notification) -> Result<(Vec<u8>, i32, u16)> {
+    /// Render a card; returns `(pixels, stride, height, regions)` with
+    /// content-derived height and clickable button/link regions.
+    fn render_pixels(&self, n: &Notification) -> Result<(Vec<u8>, i32, u16, Vec<Region>)> {
         let icon = super::assets::load_icon(
             &n.app_icon,
             n.image_path.as_deref(),
             n.image_data.as_ref(),
             48,
         );
-        let (pixels, stride, height) = cairo::render_card(&Card {
+        // Inline <img> body images (local paths), scaled to fit the column.
+        let inline_images: Vec<(Vec<u8>, i32, i32)> = crate::markup::extract_images(&n.body)
+            .iter()
+            .filter_map(|src| super::assets::load_image(src, 360, 240))
+            .collect();
+        let links = crate::markup::extract_links(&n.body);
+        // Action buttons: every action except the whole-card "default".
+        let buttons: Vec<(String, String)> = n
+            .actions
+            .iter()
+            .filter(|a| a.key != "default")
+            .map(|a| (a.key.clone(), a.label.clone()))
+            .collect();
+        let (pixels, stride, height, regions) = cairo::render_card(&Card {
             summary: &n.summary,
             body: &n.body,
             width: self.popup_width() as i32,
             icon,
+            inline_images: &inline_images,
+            buttons: &buttons,
+            links: &links,
             font: &self.config.font_family,
             summary_pt: self.config.summary_size_pt,
             body_pt: self.config.body_size_pt,
+            title_body_gap: self.config.title_body_gap_px as i32,
             bg: self.config.bg,
             fg: self.config.fg,
         })?;
-        Ok((pixels, stride, height as u16))
+        Ok((pixels, stride, height as u16, regions))
     }
 
     /// Notify clients of a close/action, if this is an FDO notification.
@@ -285,7 +311,7 @@ impl Manager {
         }
         let expires_at = self.deadline(&n);
         let default_action = n.default_action.clone();
-        let (pixels, stride, height) = self.render_pixels(&n)?;
+        let (pixels, stride, height, regions) = self.render_pixels(&n)?;
 
         // replaces_id / dedup: update in place if the id is already displayed
         // (and not already fading out).
@@ -301,6 +327,7 @@ impl Manager {
                 p.stride = stride;
                 p.expires_at = expires_at;
                 p.default_action = default_action;
+                p.regions = regions;
                 resize = p.height != height;
                 p.height = height;
             }
@@ -366,6 +393,7 @@ impl Manager {
                 default_action,
                 fade,
                 notification: n,
+                regions,
             },
         );
         self.reflow()
@@ -459,27 +487,45 @@ impl Manager {
         self.config.fade_ms > 0 && self.popups.iter().any(|p| !matches!(p.fade, Fade::Visible))
     }
 
-    /// A click on a popup: invoke its default action (if any), then dismiss.
-    fn click_window(&mut self, window: Window) -> Result<()> {
-        let found = self
-            .popups
+    /// Dispatch an action by key on a notification (Fdo `ActionInvoked` or GTK
+    /// `ActivateAction`), via the feedback channel.
+    fn dispatch_action(&self, id: &NotificationId, key: String) {
+        match id {
+            NotificationId::Fdo(fid) => self.emit(Feedback::Action { id: *fid, key }),
+            NotificationId::Gtk { app_id, .. } => self.emit(Feedback::GtkActivate {
+                app_id: app_id.clone(),
+                action: key,
+            }),
+        }
+    }
+
+    /// A click at `(x, y)` within a popup: a hit on a link opens it (popup stays);
+    /// a hit on a button invokes that action and dismisses; elsewhere invokes the
+    /// default action (if any) and dismisses.
+    fn click(&mut self, window: Window, x: i32, y: i32) -> Result<()> {
+        let Some(idx) = self.popups.iter().position(|p| p.window == window) else {
+            return Ok(());
+        };
+        let hit = self.popups[idx]
+            .regions
             .iter()
-            .find(|p| p.window == window)
-            .map(|p| (p.id.clone(), p.default_action.clone()));
-        if let Some((id, default_action)) = found {
-            match (&id, default_action) {
-                (NotificationId::Fdo(fid), Some(key)) => {
-                    self.emit(Feedback::Action { id: *fid, key })
-                }
-                (NotificationId::Gtk { app_id, .. }, Some(action)) => {
-                    self.emit(Feedback::GtkActivate {
-                        app_id: app_id.clone(),
-                        action,
-                    })
-                }
-                _ => {}
+            .find(|r| r.contains(x, y))
+            .map(|r| r.kind.clone());
+        let id = self.popups[idx].id.clone();
+        match hit {
+            Some(RegionKind::Link(url)) => {
+                self.emit(Feedback::OpenUrl(url)); // keep the popup open
             }
-            self.close(&id, reason::DISMISSED)?;
+            Some(RegionKind::Button(key)) => {
+                self.dispatch_action(&id, key);
+                self.close(&id, reason::DISMISSED)?;
+            }
+            None => {
+                if let Some(action) = self.popups[idx].default_action.clone() {
+                    self.dispatch_action(&id, action);
+                }
+                self.close(&id, reason::DISMISSED)?;
+            }
         }
         Ok(())
     }
@@ -505,9 +551,10 @@ impl Manager {
                     self.ui.put_argb(p.window, p.height, p.stride, &p.pixels)?;
                 }
             }
-            // M4-remaining: hit-test against per-button layout regions; for now a
-            // click invokes the default action (if any) and dismisses.
-            Event::ButtonPress(e) => self.click_window(e.event)?,
+            // Left-click only; hit-test buttons/links, else the default action.
+            Event::ButtonPress(e) if e.detail == 1 => {
+                self.click(e.event, e.event_x as i32, e.event_y as i32)?
+            }
             _ => {}
         }
         Ok(())
@@ -529,7 +576,9 @@ pub fn run(
     config: Config,
 ) -> Result<()> {
     let ui = Ui::connect()?;
-    let mon = ui.primary_geometry()?;
+    let monitors: Vec<String> = ui.list_monitors().into_iter().map(|m| m.0).collect();
+    info!(?monitors, "detected monitors");
+    let mon = ui.monitor_geometry(&config.monitor)?;
     let mut mgr = Manager::new(ui, config, mon, feedback);
     info!(?mon, "render thread started");
 

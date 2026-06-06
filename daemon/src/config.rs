@@ -34,9 +34,13 @@ pub struct Config {
     pub width_height_fraction: f64,
     pub max_width_fraction: f64,
     pub margin_px: u16,
+    /// Monitor to render on: "primary" or a RandR connector name (e.g. "DP-1").
+    pub monitor: String,
     pub font_family: String,
     pub summary_size_pt: f64,
     pub body_size_pt: f64,
+    /// Vertical gap between the title and the body, in px.
+    pub title_body_gap_px: u16,
     pub fade_ms: u64,
     pub history_size: usize,
     pub suppress_on_fullscreen: bool,
@@ -57,9 +61,11 @@ impl Default for Config {
             width_height_fraction: 0.30,
             max_width_fraction: 0.18,
             margin_px: 16,
+            monitor: "primary".to_string(),
             font_family: "Sans".to_string(),
             summary_size_pt: 12.0,
             body_size_pt: 10.0,
+            title_body_gap_px: 4,
             fade_ms: 150,
             history_size: 100,
             suppress_on_fullscreen: true,
@@ -106,6 +112,8 @@ impl Config {
         c.width_height_fraction = ours.double("width-height-fraction");
         c.max_width_fraction = ours.double("max-width-fraction");
         c.margin_px = ours.uint("margin-px") as u16;
+        c.monitor = ours.string("monitor").to_string();
+        c.title_body_gap_px = ours.uint("title-body-gap-px") as u16;
         c.fade_ms = ours.uint("fade-ms") as u64;
         c.history_size = ours.uint("history-size") as usize;
         c.suppress_on_fullscreen = ours.boolean("suppress-on-fullscreen");
