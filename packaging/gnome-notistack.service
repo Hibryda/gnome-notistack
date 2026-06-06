@@ -1,7 +1,14 @@
 # systemd user unit for the gnome-notistack daemon.
-# Type=dbus: readiness is signalled by BusName appearance (no sd_notify needed).
-# ExecStopPost survives even SIGKILL, so a crash restores the shell's own
-# notification proxy by removing the blocking overrides + reloading systemd.
+#
+# Long-running, queued model: the daemon starts at login, requests both
+# notification names (REPLACE_EXISTING only → InQueue), and waits. The companion
+# extension then frees the names (SIGTERM the gjs proxy + ReleaseName the GTK
+# name) and D-Bus promotes the queued daemon. Starting the daemon BEFORE the
+# extension's (deferred, daemon-ready-gated) takeover is what makes login safe —
+# the extension never frees a name with no claimant.
+#
+# Not Type=dbus (the name isn't owned until takeover) and not D-Bus-activated;
+# no /bin/false override is used, so there is nothing to clean up on stop.
 [Unit]
 Description=gnome-notistack notification daemon
 Documentation=https://git.hemoglobina.store/hibryda/gnome-notistack
@@ -9,10 +16,8 @@ PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
-Type=dbus
-BusName=org.freedesktop.Notifications
+Type=simple
 ExecStart=/usr/lib/gnome-notistack/gnome-notistack
-ExecStopPost=/bin/sh -c 'rm -f "%h/.config/systemd/user/org.gnome.Shell.Notifications.service.d/override.conf" "%h/.local/share/dbus-1/services/org.gnome.Shell.Notifications.service"; systemctl --user daemon-reload'
 Restart=on-failure
 RestartSec=2
 

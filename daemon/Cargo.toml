@@ -46,9 +46,7 @@ depends = "$auto"
 assets = [
     ["target/release/gnome-notistack", "usr/lib/gnome-notistack/gnome-notistack", "755"],
     ["../packaging/gnome-notistack.service", "usr/lib/systemd/user/gnome-notistack.service", "644"],
-    ["../packaging/dbus-1/org.freedesktop.Notifications.service", "usr/share/dbus-1/services/org.freedesktop.Notifications.service", "644"],
     ["../extension/extension.js", "usr/share/gnome-shell/extensions/notistack@hemoglobina.store/extension.js", "644"],
     ["../extension/handshake.js", "usr/share/gnome-shell/extensions/notistack@hemoglobina.store/handshake.js", "644"],
-    ["../extension/serviceOverride.js", "usr/share/gnome-shell/extensions/notistack@hemoglobina.store/serviceOverride.js", "644"],
     ["../extension/metadata.json", "usr/share/gnome-shell/extensions/notistack@hemoglobina.store/metadata.json", "644"],
 ]

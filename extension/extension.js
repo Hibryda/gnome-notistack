@@ -1,60 +1,62 @@
 // extension.js — gnome-notistack takeover companion (GNOME Shell 48).
 //
 // Frees the notification bus names for the daemon and (on disable) restores the
-// shell's handling. The actual mechanism lives in handshake.js; this file owns
-// the lifecycle, the version guard, and the field-access type guards.
+// shell's handling. The mechanism lives in handshake.js.
 //
-// Field names confirmed by the M0.5 source audit (docs/gnome48-audit.md):
-//   Main.notificationDaemon._fdoNotificationDaemon
-//   Main.notificationDaemon._gtkNotificationDaemon
+// CRASH-SAFETY (the login SIGSEGV postmortem):
+//   - enable() does NOT touch shell internals synchronously and does NOT unexport
+//     the in-process daemon (that destabilized the shell mid-init).
+//   - The takeover is DEFERRED past the fragile shell-init window, and
+//     handshake.takeover() refuses to free any name unless our daemon is up and
+//     ready to claim it. Together these prevent the "free names with no claimant
+//     during init" path that segfaulted gnome-shell at login.
+
+import GLib from 'gi://GLib';
 
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
-import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 
 import * as Handshake from './handshake.js';
 
-// The M0.5 live spike confirmed mid-session ReleaseName keeps the shell stable
-// and that disable() restores cleanly (re-own, no Meta.restart), so the GTK
-// takeover is enabled. See docs/gnome48-audit.md "GTK path".
+// Validated live (M0.5): mid-session ReleaseName is safe and disable() restores
+// cleanly (re-own, no Meta.restart). See docs/gnome48-audit.md "GTK path".
 const ALLOW_GTK_TAKEOVER = true;
+
+// Seconds to wait after enable() before attempting the takeover, to clear the
+// shell-init window. The takeover additionally waits for the daemon to be ready.
+const TAKEOVER_DELAY_SECONDS = 4;
 
 export default class NotistackTakeoverExtension extends Extension {
     enable() {
         this._gtkTakenOver = false;
+        this._takeoverTimeout = 0;
 
         // Version guard: this technique is validated only against GNOME 48.x.
         const [major] = Config.PACKAGE_VERSION.split('.');
         if (major !== '48') {
             logError(new Error(
                 `gnome-notistack: unsupported GNOME Shell ${Config.PACKAGE_VERSION} ` +
-                `(this extension targets 48.x); takeover skipped`));
+                `(targets 48.x); takeover skipped`));
             return;
-        }
-
-        // Type-guard the shell internals before touching them (rule 02).
-        const daemon = Main.notificationDaemon;
-        if (!daemon || typeof daemon._fdoNotificationDaemon !== 'object') {
-            logError(new Error(
-                'gnome-notistack: Main.notificationDaemon internals not as expected; ' +
-                'takeover skipped'));
-            return;
-        }
-
-        // Hygiene: unexport the in-process Fdo object path so the shell stops
-        // answering on it (the gjs proxy still owns the *name* until SIGTERM).
-        try {
-            daemon._fdoNotificationDaemon?._dbusImpl?.unexport?.();
-        } catch (e) {
-            logError(e, 'gnome-notistack: _fdoNotificationDaemon.unexport failed');
         }
 
         this._gtkTakenOver = ALLOW_GTK_TAKEOVER;
-        Handshake.takeover({ allowGtkTakeover: ALLOW_GTK_TAKEOVER })
-            .catch(e => logError(e, 'gnome-notistack: takeover failed'));
+        // Defer out of the shell-init window; the takeover itself is gated on the
+        // daemon being ready, so it never destabilizes the shell.
+        this._takeoverTimeout = GLib.timeout_add_seconds(
+            GLib.PRIORITY_DEFAULT, TAKEOVER_DELAY_SECONDS, () => {
+                this._takeoverTimeout = 0;
+                Handshake.takeover({ allowGtkTakeover: ALLOW_GTK_TAKEOVER })
+                    .catch(e => logError(e, 'gnome-notistack: takeover failed'));
+                return GLib.SOURCE_REMOVE;
+            });
     }
 
     disable() {
+        if (this._takeoverTimeout) {
+            GLib.source_remove(this._takeoverTimeout);
+            this._takeoverTimeout = 0;
+        }
         Handshake.restore({ gtkWasTakenOver: this._gtkTakenOver })
             .catch(e => logError(e, 'gnome-notistack: restore failed'));
         this._gtkTakenOver = false;
