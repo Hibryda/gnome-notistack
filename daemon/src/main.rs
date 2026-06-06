@@ -85,6 +85,33 @@ async fn run(config: config::Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Invoke a GTK notification's default action on its app via
+/// `org.freedesktop.Application.ActivateAction` (the `app.` prefix is stripped).
+async fn activate_gtk_action(conn: &zbus::Connection, app_id: &str, action: &str) {
+    use std::collections::HashMap;
+    use zbus::zvariant::Value;
+
+    let object_path = format!("/{}", app_id.replace('.', "/"));
+    let action_name = action.strip_prefix("app.").unwrap_or(action);
+    let body = (
+        action_name,
+        Vec::<Value>::new(),
+        HashMap::<String, Value>::new(),
+    );
+    if let Err(e) = conn
+        .call_method(
+            Some(app_id),
+            object_path.as_str(),
+            Some("org.freedesktop.Application"),
+            "ActivateAction",
+            &body,
+        )
+        .await
+    {
+        error!(app_id, action, error = %e, "GTK ActivateAction failed");
+    }
+}
+
 /// Drain the feedback channel and emit the matching FDO signals on the session bus.
 fn spawn_signal_emitter(
     conn: zbus::Connection,
@@ -125,6 +152,9 @@ fn spawn_signal_emitter(
                             .stderr(std::process::Stdio::null())
                             .spawn();
                     }
+                }
+                render::Feedback::GtkActivate { app_id, action } => {
+                    activate_gtk_action(&conn, &app_id, &action).await;
                 }
             }
         }

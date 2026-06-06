@@ -213,11 +213,7 @@ impl Manager {
             return Ok(());
         }
         let expires_at = self.deadline(&n);
-        let default_action = n
-            .actions
-            .iter()
-            .find(|a| a.key == "default")
-            .map(|a| a.key.clone());
+        let default_action = n.default_action.clone();
         let (pixels, stride, height) = self.render_pixels(&n)?;
 
         // replaces_id / dedup: update in place if the id is already displayed
@@ -396,8 +392,17 @@ impl Manager {
             .find(|p| p.window == window)
             .map(|p| (p.id.clone(), p.default_action.clone()));
         if let Some((id, default_action)) = found {
-            if let (NotificationId::Fdo(fid), Some(key)) = (&id, default_action) {
-                self.emit(Feedback::Action { id: *fid, key });
+            match (&id, default_action) {
+                (NotificationId::Fdo(fid), Some(key)) => {
+                    self.emit(Feedback::Action { id: *fid, key })
+                }
+                (NotificationId::Gtk { app_id, .. }, Some(action)) => {
+                    self.emit(Feedback::GtkActivate {
+                        app_id: app_id.clone(),
+                        action,
+                    })
+                }
+                _ => {}
             }
             self.close(&id, reason::DISMISSED)?;
         }

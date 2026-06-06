@@ -147,6 +147,11 @@ impl FdoNotifications {
             self.next_id.fetch_add(1, Ordering::Relaxed)
         };
 
+        let actions = parse_actions(actions);
+        let default_action = actions
+            .iter()
+            .any(|a| a.key == "default")
+            .then(|| "default".to_string());
         let notification = Notification {
             id: NotificationId::Fdo(id),
             app_name,
@@ -155,7 +160,8 @@ impl FdoNotifications {
             image_data: parse_image_data(&hints),
             summary,
             body,
-            actions: parse_actions(actions),
+            actions,
+            default_action,
             urgency: parse_urgency(&hints),
             sound_file: string_hint(&hints, "sound-file"),
             sound_name: string_hint(&hints, "sound-name"),

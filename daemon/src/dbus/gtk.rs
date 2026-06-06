@@ -61,6 +61,9 @@ impl GtkNotifications {
             summary: str_field(&notification, "title").unwrap_or_default(),
             body: str_field(&notification, "body").unwrap_or_default(),
             actions: Vec::new(),
+            // Whole-card click invokes the GTK default-action (M7.1). Buttons
+            // are parsed/rendered in a later pass.
+            default_action: str_field(&notification, "default-action"),
             urgency,
             sound_file: None,
             sound_name: None,

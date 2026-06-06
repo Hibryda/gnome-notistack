@@ -41,6 +41,8 @@ pub enum Feedback {
         file: Option<String>,
         name: Option<String>,
     },
+    /// Invoke a GTK notification's default action via `org.freedesktop.Application`.
+    GtkActivate { app_id: String, action: String },
 }
 
 /// Chosen once at startup by probing (plan risk R5): the cairo XCBSurface fast

@@ -53,6 +53,9 @@ pub struct Notification {
     pub summary: String,
     pub body: String,
     pub actions: Vec<Action>,
+    /// Action invoked on a whole-card click: Fdo `"default"` key, or a GTK
+    /// `app.`-prefixed action name. `None` if the notification has no default.
+    pub default_action: Option<String>,
     pub urgency: Urgency,
     /// `sound-file` hint (a path to an audio file), if provided.
     pub sound_file: Option<String>,
