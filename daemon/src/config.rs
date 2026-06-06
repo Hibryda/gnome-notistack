@@ -67,12 +67,6 @@ impl Config {
         Duration::from_millis(self.low_urgency_timeout_ms)
     }
 
-    /// Load from the default location, falling back to defaults when absent
-    /// (rule 14: runnable with zero config). A present-but-invalid file is fatal.
-    pub fn load() -> anyhow::Result<Self> {
-        Self::load_from(None)
-    }
-
     /// Load config. With an explicit `override_path`, a missing file is a hard
     /// error; otherwise the default path is used and absence falls back to
     /// defaults. A present-but-invalid file is always fatal (rule 02).

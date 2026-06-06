@@ -3,20 +3,16 @@
 //! Shows multiple notifications at once as a vertical stack of override-redirect
 //! ARGB popups (dunst-style, on GNOME). See `docs/IMPLEMENTATION-PLAN.md`.
 //!
-//! This is the **M0 scaffold**: every module is wired and the crate compiles;
 //! `// M<n>:` comments mark where each milestone's behavior lands.
-#![allow(dead_code)] // M0 scaffold: stubs are not yet wired into the run loop.
 
 mod a11y;
 mod bus;
 mod cli;
 mod config;
 mod dbus;
-mod error;
 mod history;
 mod lockscreen;
 mod markup;
-mod name_watcher;
 mod notification;
 mod render;
 mod shutdown;

@@ -149,12 +149,12 @@ impl Manager {
         if !n.auto_expires() {
             return None;
         }
-        let ms = match n.expire_timeout_ms {
-            Some(v) if v > 0 => v as u64,
-            _ if n.urgency == Urgency::Low => self.config.low_urgency_timeout_ms,
-            _ => self.config.default_timeout_ms,
+        let dur = match n.expire_timeout_ms {
+            Some(v) if v > 0 => Duration::from_millis(v as u64),
+            _ if n.urgency == Urgency::Low => self.config.low_urgency_timeout(),
+            _ => self.config.default_timeout(),
         };
-        Some(n.created + Duration::from_millis(ms))
+        Some(n.created + dur)
     }
 
     /// Render a card; returns `(pixels, stride, height)` with content-derived height.

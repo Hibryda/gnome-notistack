@@ -24,9 +24,12 @@ pub enum Urgency {
 
 /// An actionable button. Fdo: `(key, label)` pairs from the `actions` array.
 /// GTK: `app.`-prefixed action names invoked via `org.freedesktop.Application.ActivateAction`.
+/// `label` is parsed and stored for the deferred button-rendering pass
+/// (docs/known-loss.md); whole-card default-action dispatch already works.
 #[derive(Debug, Clone)]
 pub struct Action {
     pub key: String,
+    #[allow(dead_code)]
     pub label: String,
 }
 
@@ -36,6 +39,8 @@ pub struct RawImage {
     pub width: i32,
     pub height: i32,
     pub rowstride: i32,
+    /// Part of the FDO structure; we derive alpha from `channels` instead.
+    #[allow(dead_code)]
     pub has_alpha: bool,
     pub channels: i32,
     pub bytes: Vec<u8>,
@@ -52,6 +57,8 @@ pub struct Notification {
     pub image_data: Option<RawImage>,
     pub summary: String,
     pub body: String,
+    /// Parsed action buttons, stored for deferred button rendering (docs/known-loss.md).
+    #[allow(dead_code)]
     pub actions: Vec<Action>,
     /// Action invoked on a whole-card click: Fdo `"default"` key, or a GTK
     /// `app.`-prefixed action name. `None` if the notification has no default.

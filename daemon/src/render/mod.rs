@@ -47,7 +47,9 @@ pub enum Feedback {
 
 /// Chosen once at startup by probing (plan risk R5): the cairo XCBSurface fast
 /// path (the one load-bearing unsafe seam) or the safe ImageSurface + put_image
-/// fallback. A single decision, not per-window.
+/// fallback. Scaffolding for the deferred XCBSurface optimization (see
+/// docs/known-loss.md) — the ImageSurface path is what currently runs.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderMode {
     XcbSurface,

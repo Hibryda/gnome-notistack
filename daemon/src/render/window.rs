@@ -10,8 +10,9 @@
 use super::RenderMode;
 
 /// Probe whether the cairo XCBSurface path is usable; otherwise fall back to
-/// ImageSurface (plan risk R5). M2 implements the scratch-pixmap probe; until
-/// then the safe fallback is assumed.
+/// ImageSurface (plan risk R5). Scaffolding for the deferred XCBSurface fast
+/// path (docs/known-loss.md); the ImageSurface path is what currently runs.
+#[allow(dead_code)]
 pub fn probe_render_mode() -> RenderMode {
     // M2: create a scratch ARGB32 pixmap and attempt cairo::XCBSurface::create.
     RenderMode::ImageSurface

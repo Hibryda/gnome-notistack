@@ -1,7 +1,9 @@
-//! Card layout + click regions (M4).
+//! Card layout + click regions.
 //!
-//! Computes geometry for the icon, summary, body, and action buttons of a popup,
-//! and exports the clickable regions consumed by `event_loop` for hit-testing.
+//! Scaffolding for **per-button** click regions (deferred button rendering — see
+//! docs/known-loss.md). Whole-card click + default-action dispatch already work
+//! in `render::manager`; these types are consumed once buttons are drawn.
+#![allow(dead_code)]
 
 /// A clickable region within a popup, mapped to an action or affordance.
 #[derive(Debug, Clone)]
