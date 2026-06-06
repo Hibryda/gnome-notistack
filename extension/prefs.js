@@ -11,6 +11,17 @@ import Gtk from 'gi://Gtk';
 
 import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
+/** Stop a widget from changing on mouse-scroll (so scrolling the page over a
+ *  SpinRow doesn't silently nudge its value). */
+function ignoreScroll(widget) {
+    const scroll = new Gtk.EventControllerScroll({
+        flags: Gtk.EventControllerScrollFlags.BOTH_AXES,
+        propagation_phase: Gtk.PropagationPhase.CAPTURE,
+    });
+    scroll.connect('scroll', () => true); // Gdk.EVENT_STOP
+    widget.add_controller(scroll);
+}
+
 /** SpinRow bound manually (avoids uint/double <-> double binding mismatches). */
 function addSpin(group, settings, key, title, opts) {
     const { lower, upper, step, digits = 0, isDouble = false, subtitle = '' } = opts;
@@ -20,6 +31,7 @@ function addSpin(group, settings, key, title, opts) {
         digits,
         adjustment: new Gtk.Adjustment({ lower, upper, step_increment: step }),
     });
+    ignoreScroll(row);
     const get = () => (isDouble ? settings.get_double(key) : settings.get_uint(key));
     const set = v => (isDouble ? settings.set_double(key, v) : settings.set_uint(key, Math.round(v)));
     row.set_value(get());
@@ -65,6 +77,7 @@ function addMonitorCombo(group, settings) {
     options.forEach(([, label]) => model.append(label));
     const keys = options.map(([k]) => k);
     const row = new Adw.ComboRow({ title: 'Monitor', model });
+    ignoreScroll(row);
     const sync = () => {
         const i = keys.indexOf(settings.get_string('monitor'));
         row.set_selected(i >= 0 ? i : 0);
@@ -81,6 +94,7 @@ function addThemeCombo(group, settings) {
     options.forEach(([, label]) => model.append(label));
     const keys = options.map(([k]) => k);
     const row = new Adw.ComboRow({ title: 'Color theme', model });
+    ignoreScroll(row);
     const sync = () => row.set_selected(Math.max(0, keys.indexOf(settings.get_string('theme-mode'))));
     sync();
     row.connect('notify::selected', () => settings.set_string('theme-mode', keys[row.get_selected()]));
