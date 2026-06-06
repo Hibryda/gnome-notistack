@@ -11,8 +11,8 @@ use x11rb::connection::Connection;
 use x11rb::protocol::randr::ConnectionExt as _;
 use x11rb::protocol::xproto::ConnectionExt as _;
 use x11rb::protocol::xproto::{
-    AtomEnum, Colormap, ColormapAlloc, CreateGCAux, CreateWindowAux, EventMask, ImageFormat,
-    PropMode, Screen, VisualClass, Visualid, Window, WindowClass,
+    AtomEnum, ChangeWindowAttributesAux, Colormap, ColormapAlloc, CreateGCAux, CreateWindowAux,
+    EventMask, ImageFormat, PropMode, Screen, VisualClass, Visualid, Window, WindowClass,
 };
 use x11rb::wrapper::ConnectionExt as _;
 use x11rb::xcb_ffi::XCBConnection;
@@ -31,6 +31,8 @@ pub struct Ui {
     fullscreen_atom: u32,
     /// Cached `_NET_WORKAREA` atom (usable area excluding panels/docks).
     workarea_atom: u32,
+    /// Hand cursor for hovering buttons/links (0 if unavailable).
+    hand_cursor: u32,
 }
 
 impl Ui {
@@ -53,6 +55,36 @@ impl Ui {
         let wm_state_atom = intern(b"_NET_WM_STATE")?;
         let fullscreen_atom = intern(b"_NET_WM_STATE_FULLSCREEN")?;
         let workarea_atom = intern(b"_NET_WORKAREA")?;
+        // Hand cursor (glyph XC_hand2 = 58) from the standard "cursor" font.
+        let hand_cursor = {
+            let font = conn.generate_id().unwrap_or(0);
+            let cur = conn.generate_id().unwrap_or(0);
+            if font != 0 && cur != 0 && conn.open_font(font, b"cursor").is_ok() {
+                let ok = conn
+                    .create_glyph_cursor(
+                        cur,
+                        font,
+                        font,
+                        58,
+                        59,
+                        0,
+                        0,
+                        0,
+                        u16::MAX,
+                        u16::MAX,
+                        u16::MAX,
+                    )
+                    .is_ok();
+                let _ = conn.close_font(font);
+                if ok {
+                    cur
+                } else {
+                    0
+                }
+            } else {
+                0
+            }
+        };
         Ok(Self {
             conn,
             screen_num,
@@ -64,7 +96,17 @@ impl Ui {
             wm_state_atom,
             fullscreen_atom,
             workarea_atom,
+            hand_cursor,
         })
+    }
+
+    /// Set (or clear) the hand cursor on a popup window for hover feedback.
+    pub fn set_pointer(&self, win: Window, hand: bool) -> Result<()> {
+        let cursor = if hand { self.hand_cursor } else { 0 };
+        self.conn
+            .change_window_attributes(win, &ChangeWindowAttributesAux::new().cursor(cursor))?;
+        self.conn.flush()?;
+        Ok(())
     }
 
     /// The desktop work area `(x, y, width, height)` from `_NET_WORKAREA` — the
@@ -217,7 +259,8 @@ impl Ui {
                     | EventMask::BUTTON_PRESS
                     | EventMask::BUTTON_RELEASE
                     | EventMask::ENTER_WINDOW
-                    | EventMask::LEAVE_WINDOW,
+                    | EventMask::LEAVE_WINDOW
+                    | EventMask::POINTER_MOTION,
             );
         self.conn
             .create_window(

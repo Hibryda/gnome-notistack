@@ -82,6 +82,7 @@ pub fn demo(config: &crate::config::Config) -> Result<()> {
         summary_pt: config.summary_size_pt,
         body_pt: config.body_size_pt,
         title_body_gap: config.title_body_gap_px as i32,
+        hover: None,
         bg: config.bg,
         fg: config.fg,
     })?;

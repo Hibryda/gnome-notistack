@@ -55,6 +55,9 @@ pub struct Card<'a> {
     pub body_pt: f64,
     /// Gap between the title and the body, in px.
     pub title_body_gap: i32,
+    /// Index (into the returned regions) currently under the pointer, if any —
+    /// drawn with a hover highlight. Regions are ordered links-then-buttons.
+    pub hover: Option<usize>,
     /// Background / foreground colors (RGBA 0–1), from the theme or overrides.
     pub bg: [f64; 4],
     pub fg: [f64; 4],
@@ -218,13 +221,13 @@ pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32, Vec<Region>)> {
         ::pangocairo::functions::show_layout(&cr, &tl);
         y += title_h;
 
-        // Body + link regions.
+        // Body + link regions. Link rects are computed before the text is drawn
+        // so the hovered link's highlight can sit behind it.
         if has_body {
             y += gap;
             let bl = make_on(&cr, &body_markup, text_width);
-            cr.move_to(text_x as f64, y as f64);
-            ::pangocairo::functions::show_layout(&cr, &bl);
             let text = bl.text();
+            let mut link_rects: Vec<(i32, i32, i32, i32, String)> = Vec::new();
             for (url, ltext) in card.links {
                 if ltext.is_empty() {
                     continue;
@@ -235,19 +238,40 @@ pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32, Vec<Region>)> {
                     let s = ::pango::SCALE;
                     let (sx, sy, sh) = (sp.x() / s, sp.y() / s, sp.height() / s);
                     let (ex, ey) = (ep.x() / s, ep.y() / s);
-                    let rect = if sy == ey {
+                    let r = if sy == ey {
                         (text_x + sx.min(ex), y + sy, (ex - sx).abs(), sh)
                     } else {
                         (text_x, y + sy, text_w_px, (ey + sh) - sy)
                     };
-                    regions.push(Region {
-                        x: rect.0,
-                        y: rect.1,
-                        w: rect.2.max(1),
-                        h: rect.3.max(1),
-                        kind: RegionKind::Link(url.clone()),
-                    });
+                    link_rects.push((r.0, r.1, r.2.max(1), r.3.max(1), url.clone()));
                 }
+            }
+            // Hover highlight (link regions are indices 0..link_rects.len()).
+            for (i, (lx, ly, lw, lh, _)) in link_rects.iter().enumerate() {
+                if card.hover == Some(i) {
+                    rounded_rect(
+                        &cr,
+                        (*lx - 3) as f64,
+                        (*ly - 1) as f64,
+                        (*lw + 6) as f64,
+                        (*lh + 2) as f64,
+                        4.0,
+                    );
+                    cr.set_source_rgba(card.fg[0], card.fg[1], card.fg[2], 0.20);
+                    cr.fill().ok();
+                }
+            }
+            cr.move_to(text_x as f64, y as f64);
+            cr.set_source_rgba(card.fg[0], card.fg[1], card.fg[2], card.fg[3]);
+            ::pangocairo::functions::show_layout(&cr, &bl);
+            for (lx, ly, lw, lh, url) in link_rects {
+                regions.push(Region {
+                    x: lx,
+                    y: ly,
+                    w: lw,
+                    h: lh,
+                    kind: RegionKind::Link(url),
+                });
             }
             y += body_h;
         }
@@ -296,12 +320,20 @@ pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32, Vec<Region>)> {
             cr.line_to(w, bar_top as f64 + 0.5);
             cr.stroke().ok();
 
+            let n_links = regions.len();
             let seg = card.width / n;
             for (i, (key, label)) in card.buttons.iter().enumerate() {
-                let i = i as i32;
-                let x0 = i * seg;
-                let seg_w = if i == n - 1 { card.width - x0 } else { seg };
-                if i > 0 {
+                let ii = i as i32;
+                let x0 = ii * seg;
+                let seg_w = if ii == n - 1 { card.width - x0 } else { seg };
+                // Hover highlight for this segment (over the base bar fill).
+                if card.hover == Some(n_links + i) {
+                    cr.set_source_rgba(card.fg[0], card.fg[1], card.fg[2], 0.10);
+                    cr.rectangle(x0 as f64, bar_top as f64, seg_w as f64, bar_h as f64);
+                    cr.fill().ok();
+                }
+                cr.set_source_rgba(card.fg[0], card.fg[1], card.fg[2], 0.14);
+                if ii > 0 {
                     cr.move_to(x0 as f64 + 0.5, bar_top as f64);
                     cr.line_to(x0 as f64 + 0.5, height as f64);
                     cr.stroke().ok();

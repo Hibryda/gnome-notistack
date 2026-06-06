@@ -57,6 +57,8 @@ struct Popup {
     notification: Notification,
     /// Clickable regions (buttons + links) in window-local pixels.
     regions: Vec<Region>,
+    /// Region index currently under the pointer (for the hover highlight).
+    hover: Option<usize>,
 }
 
 struct Manager {
@@ -134,7 +136,8 @@ impl Manager {
         // Re-render every popup with the new font/colors/width.
         for i in 0..self.popups.len() {
             let n = self.popups[i].notification.clone();
-            let (pixels, stride, height, regions) = self.render_pixels(&n)?;
+            let hover = self.popups[i].hover;
+            let (pixels, stride, height, regions) = self.render_pixels(&n, hover)?;
             let win = self.popups[i].window;
             let w = self.popup_width() as u32;
             self.ui.conn.configure_window(
@@ -235,8 +238,13 @@ impl Manager {
     }
 
     /// Render a card; returns `(pixels, stride, height, regions)` with
-    /// content-derived height and clickable button/link regions.
-    fn render_pixels(&self, n: &Notification) -> Result<(Vec<u8>, i32, u16, Vec<Region>)> {
+    /// content-derived height and clickable button/link regions. `hover` is the
+    /// region index under the pointer (highlighted), if any.
+    fn render_pixels(
+        &self,
+        n: &Notification,
+        hover: Option<usize>,
+    ) -> Result<(Vec<u8>, i32, u16, Vec<Region>)> {
         let icon = super::assets::load_icon(
             &n.app_icon,
             n.image_path.as_deref(),
@@ -268,6 +276,7 @@ impl Manager {
             summary_pt: self.config.summary_size_pt,
             body_pt: self.config.body_size_pt,
             title_body_gap: self.config.title_body_gap_px as i32,
+            hover,
             bg: self.config.bg,
             fg: self.config.fg,
         })?;
@@ -311,7 +320,7 @@ impl Manager {
         }
         let expires_at = self.deadline(&n);
         let default_action = n.default_action.clone();
-        let (pixels, stride, height, regions) = self.render_pixels(&n)?;
+        let (pixels, stride, height, regions) = self.render_pixels(&n, None)?;
 
         // replaces_id / dedup: update in place if the id is already displayed
         // (and not already fading out).
@@ -328,6 +337,7 @@ impl Manager {
                 p.expires_at = expires_at;
                 p.default_action = default_action;
                 p.regions = regions;
+                p.hover = None;
                 resize = p.height != height;
                 p.height = height;
             }
@@ -394,6 +404,7 @@ impl Manager {
                 fade,
                 notification: n,
                 regions,
+                hover: None,
             },
         );
         self.reflow()
@@ -499,6 +510,48 @@ impl Manager {
         }
     }
 
+    /// Re-render popup `i` in place (e.g. a hover change) — pixels only, no resize.
+    fn rerender(&mut self, i: usize) -> Result<()> {
+        let n = self.popups[i].notification.clone();
+        let hover = self.popups[i].hover;
+        let (pixels, stride, height, _regions) = self.render_pixels(&n, hover)?;
+        self.popups[i].pixels = pixels;
+        self.popups[i].stride = stride;
+        self.ui.put_argb(
+            self.popups[i].window,
+            height,
+            stride,
+            &self.popups[i].pixels,
+        )?;
+        Ok(())
+    }
+
+    /// Pointer moved within a popup: update the hovered region + cursor, re-rendering
+    /// only when the hovered region changed.
+    fn hover_motion(&mut self, window: Window, x: i32, y: i32) -> Result<()> {
+        let Some(i) = self.popups.iter().position(|p| p.window == window) else {
+            return Ok(());
+        };
+        let new_hover = self.popups[i].regions.iter().position(|r| r.contains(x, y));
+        if new_hover != self.popups[i].hover {
+            self.popups[i].hover = new_hover;
+            self.ui.set_pointer(window, new_hover.is_some())?;
+            self.rerender(i)?;
+        }
+        Ok(())
+    }
+
+    /// Pointer left a popup: clear any hover highlight.
+    fn hover_clear(&mut self, window: Window) -> Result<()> {
+        if let Some(i) = self.popups.iter().position(|p| p.window == window) {
+            if self.popups[i].hover.is_some() {
+                self.popups[i].hover = None;
+                self.rerender(i)?;
+            }
+        }
+        Ok(())
+    }
+
     /// A click at `(x, y)` within a popup: a hit on a link opens it (popup stays);
     /// a hit on a button invokes that action and dismisses; elsewhere invokes the
     /// default action (if any) and dismisses.
@@ -555,6 +608,10 @@ impl Manager {
             Event::ButtonPress(e) if e.detail == 1 => {
                 self.click(e.event, e.event_x as i32, e.event_y as i32)?
             }
+            Event::MotionNotify(e) => {
+                self.hover_motion(e.event, e.event_x as i32, e.event_y as i32)?
+            }
+            Event::LeaveNotify(e) => self.hover_clear(e.event)?,
             _ => {}
         }
         Ok(())
