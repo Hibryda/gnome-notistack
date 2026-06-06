@@ -29,6 +29,8 @@ pub struct Ui {
     active_window_atom: u32,
     wm_state_atom: u32,
     fullscreen_atom: u32,
+    /// Cached `_NET_WORKAREA` atom (usable area excluding panels/docks).
+    workarea_atom: u32,
 }
 
 impl Ui {
@@ -50,6 +52,7 @@ impl Ui {
         let active_window_atom = intern(b"_NET_ACTIVE_WINDOW")?;
         let wm_state_atom = intern(b"_NET_WM_STATE")?;
         let fullscreen_atom = intern(b"_NET_WM_STATE_FULLSCREEN")?;
+        let workarea_atom = intern(b"_NET_WORKAREA")?;
         Ok(Self {
             conn,
             screen_num,
@@ -60,7 +63,32 @@ impl Ui {
             active_window_atom,
             wm_state_atom,
             fullscreen_atom,
+            workarea_atom,
         })
+    }
+
+    /// The desktop work area `(x, y, width, height)` from `_NET_WORKAREA` — the
+    /// usable region excluding panels/docks (so popups start under the top bar).
+    /// Returns `None` if the property is absent. (First workspace's rect.)
+    pub fn workarea(&self) -> Option<(i32, i32, i32, i32)> {
+        let reply = self
+            .conn
+            .get_property(
+                false,
+                self.root,
+                self.workarea_atom,
+                AtomEnum::CARDINAL,
+                0,
+                4,
+            )
+            .ok()?
+            .reply()
+            .ok()?;
+        let v: Vec<u32> = reply.value32()?.collect();
+        if v.len() < 4 {
+            return None;
+        }
+        Some((v[0] as i32, v[1] as i32, v[2] as i32, v[3] as i32))
     }
 
     /// Whether the currently focused window is fullscreen (best-effort; false on

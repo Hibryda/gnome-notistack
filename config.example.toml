@@ -23,7 +23,9 @@ suppress_on_fullscreen = true
 # Max simultaneously displayed popups (older ones are dropped past this).
 max_stack = 5                      # --max-stack
 # Popup width (px).
-width_px = 400                     # --width
+width_px = 0                       # 0 = derive from monitor geometry (below)
+width_height_fraction = 0.30      # popup width as fraction of monitor HEIGHT
+max_width_fraction = 0.18         # hard cap as fraction of monitor WIDTH
 # Vertical gap between stacked popups (px).
 gap_px = 10
 # Margin from the top-right screen corner (px).

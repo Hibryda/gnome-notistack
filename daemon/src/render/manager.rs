@@ -140,9 +140,35 @@ impl Manager {
         Ok(())
     }
 
-    fn popup_x(&self) -> i16 {
-        let margin = self.config.margin_px as i16;
-        self.mon.0 + self.mon.2 as i16 - self.config.width_px as i16 - margin
+    /// Geometry-derived popup width (px): a fraction of the monitor *height*,
+    /// capped at a fraction of its *width*. `config.width_px` overrides when > 0.
+    fn popup_width(&self) -> u16 {
+        if self.config.width_px > 0 {
+            return self.config.width_px;
+        }
+        let (w, h) = (self.mon.2 as f64, self.mon.3 as f64);
+        let by_height = h * self.config.width_height_fraction;
+        let cap = w * self.config.max_width_fraction;
+        by_height.min(cap).max(280.0).round() as u16
+    }
+
+    /// Top-right anchor `(x, top)` in pixels, honoring `_NET_WORKAREA` so popups
+    /// start under the top bar / clear panels and docks.
+    fn anchor(&self) -> (i32, i32) {
+        let margin = self.config.margin_px as i32;
+        let (mx, my, mw) = (self.mon.0 as i32, self.mon.1 as i32, self.mon.2 as i32);
+        // Intersect the monitor with the work area (left, top, usable width).
+        let (ax, ay, aw) = match self.ui.workarea() {
+            Some((wx, wy, ww, _wh)) => {
+                let l = mx.max(wx);
+                let t = my.max(wy);
+                let r = (mx + mw).min(wx + ww);
+                (l, t, (r - l).max(0))
+            }
+            None => (mx, my, mw),
+        };
+        let width = self.popup_width() as i32;
+        (ax + aw - width - margin, ay + margin)
     }
 
     fn deadline(&self, n: &Notification) -> Option<Instant> {
@@ -168,7 +194,7 @@ impl Manager {
         let (pixels, stride, height) = cairo::render_card(&Card {
             summary: &n.summary,
             body: &n.body,
-            width: self.config.width_px as i32,
+            width: self.popup_width() as i32,
             icon,
             font: &self.config.font_family,
             summary_pt: self.config.summary_size_pt,
@@ -259,9 +285,10 @@ impl Manager {
             }
         }
 
-        let x = self.popup_x();
-        let y = self.mon.1 + self.config.margin_px as i16;
-        let window = self.ui.create_popup(x, y, self.config.width_px, height)?;
+        let (x, top) = self.anchor();
+        let window = self
+            .ui
+            .create_popup(x as i16, top as i16, self.popup_width(), height)?;
 
         // Start transparent and fade in (if enabled), so the popup doesn't flash.
         let fade = if self.config.fade_ms > 0 {
@@ -299,15 +326,17 @@ impl Manager {
     }
 
     /// Reposition popups top-down (newest at top) with one batched flush.
+    /// Reposition popups top-down with a running y-cursor (each card's own height
+    /// + gap), so variable-height cards neither overlap nor leave wide gaps.
     fn reflow(&mut self) -> Result<()> {
-        let x = self.popup_x() as i32;
+        let (x, top) = self.anchor();
         let gap = self.config.gap_px as i32;
-        let top = (self.mon.1 + self.config.margin_px as i16) as i32;
-        for (i, p) in self.popups.iter().enumerate() {
-            let y = top + i as i32 * (p.height as i32 + gap);
+        let mut y = top;
+        for p in &self.popups {
             self.ui
                 .conn
                 .configure_window(p.window, &ConfigureWindowAux::new().x(x).y(y))?;
+            y += p.height as i32 + gap;
         }
         self.ui.conn.flush()?;
         Ok(())

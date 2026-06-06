@@ -17,8 +17,14 @@ pub struct Config {
     pub max_stack: usize,
     /// Vertical gap between stacked popups (px).
     pub gap_px: u16,
-    /// Popup width (px).
+    /// Absolute popup width (px). 0 = derive from the monitor geometry (below).
     pub width_px: u16,
+    /// Popup width as a fraction of the render monitor's *height* (drives scale
+    /// with display size; used when `width_px == 0`).
+    pub width_height_fraction: f64,
+    /// Hard cap on popup width as a fraction of the monitor's *width* (keeps it
+    /// sane on ultrawide displays).
+    pub max_width_fraction: f64,
     /// Screen-edge margin from the top-right anchor (px).
     pub margin_px: u16,
     /// Pango font family for popup text (e.g. "Cantarell", "Sans").
@@ -45,7 +51,9 @@ impl Default for Config {
             low_urgency_timeout_ms: 3000,
             max_stack: 5,
             gap_px: 10,
-            width_px: 400,
+            width_px: 0, // 0 → geometry-derived
+            width_height_fraction: 0.30,
+            max_width_fraction: 0.18,
             margin_px: 16,
             font_family: "Sans".to_string(),
             summary_size_pt: 12.0,
