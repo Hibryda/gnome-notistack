@@ -43,10 +43,15 @@ priority = "optional"
 # $auto resolves the binary's shared-lib deps via dpkg-shlibdeps (cairo, pango,
 # glib, xcb, …). SVG is pure-Rust resvg, so there is no librsvg2 dependency.
 depends = "$auto"
+# Compile the bundled GSettings schema on install/removal (the daemon reads it
+# via GSETTINGS_SCHEMA_DIR; the prefs window via the extension's schemas dir).
+maintainer-scripts = "../packaging/debian/"
 assets = [
     ["target/release/gnome-notistack", "usr/lib/gnome-notistack/gnome-notistack", "755"],
     ["../packaging/gnome-notistack.service", "usr/lib/systemd/user/gnome-notistack.service", "644"],
     ["../extension/extension.js", "usr/share/gnome-shell/extensions/notistack@hemoglobina.store/extension.js", "644"],
     ["../extension/handshake.js", "usr/share/gnome-shell/extensions/notistack@hemoglobina.store/handshake.js", "644"],
+    ["../extension/prefs.js", "usr/share/gnome-shell/extensions/notistack@hemoglobina.store/prefs.js", "644"],
     ["../extension/metadata.json", "usr/share/gnome-shell/extensions/notistack@hemoglobina.store/metadata.json", "644"],
+    ["../extension/schemas/org.gnome.shell.extensions.notistack.gschema.xml", "usr/share/gnome-shell/extensions/notistack@hemoglobina.store/schemas/org.gnome.shell.extensions.notistack.gschema.xml", "644"],
 ]

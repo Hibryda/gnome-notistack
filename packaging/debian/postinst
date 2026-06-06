@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+# Compile the bundled GSettings schema so the daemon + prefs window can read it.
+if command -v glib-compile-schemas >/dev/null 2>&1; then
+    glib-compile-schemas "/usr/share/gnome-shell/extensions/notistack@hemoglobina.store/schemas" || true
+fi
