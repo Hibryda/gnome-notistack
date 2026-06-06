@@ -28,7 +28,7 @@ pub async fn serve(
 ) -> anyhow::Result<zbus::Connection> {
     let conn = zbus::connection::Builder::session()
         .context("connecting to session bus")?
-        .serve_at(dbus::FDO_PATH, FdoNotifications::new(tx))
+        .serve_at(dbus::FDO_PATH, FdoNotifications::new(tx.clone()))
         .context("exporting FDO interface")?
         .serve_at(CONTROL_PATH, Control::default())
         .context("exporting control interface")?
@@ -40,7 +40,7 @@ pub async fn serve(
 
     if config.gtk_takeover {
         conn.object_server()
-            .at(dbus::GTK_PATH, GtkNotifications::default())
+            .at(dbus::GTK_PATH, GtkNotifications::new(tx))
             .await
             .context("exporting GTK interface")?;
         request_name(&conn, dbus::GTK_NAME).await;
