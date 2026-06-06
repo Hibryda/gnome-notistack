@@ -144,17 +144,40 @@ export async function takeover(opts) {
     if (opts.allowGtkTakeover)
         await takeoverGtk();
     else
-        reportEvent('GTK_SKIPPED', 'allowGtkTakeover=false (pending M0.5 validation)');
+        reportEvent('GTK_SKIPPED', 'allowGtkTakeover=false');
 }
 
-/** Restore shell ownership on disable(). GTK has no clean re-instantiation path. */
-export async function restore({ gtkWasTakenOver }) {
-    await ServiceOverride.remove();
-    const reload = Gio.Subprocess.new(
+async function runReload() {
+    const proc = Gio.Subprocess.new(
         ['systemctl', '--user', 'daemon-reload'], Gio.SubprocessFlags.NONE);
-    reload.wait_async(null, null);
-    // NOTE (audit §4): GtkNotificationDaemon has no destroy()/re-create path, so a
-    // full GTK restore requires Meta.restart(). That heavy step is intentionally
-    // left to the caller's explicit choice, not done implicitly here.
-    return { needsShellRestart: !!gtkWasTakenOver };
+    await new Promise(resolve => {
+        proc.wait_async(null, (p, res) => {
+            try { p.wait_finish(res); } catch (_e) {}
+            resolve();
+        });
+    });
+}
+
+/**
+ * Restore shell ownership on disable() — no Meta.restart (validated).
+ * Sequence: ask the daemon to release the names (it stays running), reactivate
+ * the gjs Fdo proxy, then re-own the GTK name for the shell (its object path was
+ * never unexported). See docs/gnome48-audit.md "GTK path".
+ */
+export async function restore({ gtkWasTakenOver }) {
+    // 1. Daemon releases org.freedesktop.Notifications + org.gtk.Notifications.
+    await dbusCall(CONTROL_NAME, CONTROL_PATH, CONTROL_NAME, 'Relinquish', null)
+        .catch(e => reportEvent('RELINQUISH_FAILED', e.message));
+
+    // 2. Restore Fdo: drop the blocking overrides, reload, reactivate the proxy.
+    await ServiceOverride.remove();
+    await runReload();
+    await dbusCall(DBUS, DBUS_PATH, DBUS, 'StartServiceByName',
+        new GLib.Variant('(su)', [SHELL_NOTIFICATIONS, 0])).catch(() => {});
+
+    // 3. Restore GTK: re-own the freed name for the shell.
+    if (gtkWasTakenOver)
+        Gio.DBus.session.own_name(GTK_NAME, Gio.BusNameOwnerFlags.REPLACE, null, null);
+
+    return { needsShellRestart: false };
 }

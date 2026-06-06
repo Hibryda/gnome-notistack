@@ -16,3 +16,6 @@ pub const GTK_NAME: &str = "org.gtk.Notifications";
 
 pub const FDO_PATH: &str = "/org/freedesktop/Notifications";
 pub const GTK_PATH: &str = "/org/gtk/Notifications";
+
+/// Our private control name (owned outright) for the extension + `notistack-ctl`.
+pub const CONTROL_NAME: &str = "store.hemoglobina.notistack.Control";

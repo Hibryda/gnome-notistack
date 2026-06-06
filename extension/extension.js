@@ -14,9 +14,10 @@ import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 
 import * as Handshake from './handshake.js';
 
-// Until the M0.5 live spike confirms mid-session ReleaseName keeps the shell
-// stable, the GTK takeover stays OFF by default (Fdo-only, fully recoverable).
-const ALLOW_GTK_TAKEOVER = false;
+// The M0.5 live spike confirmed mid-session ReleaseName keeps the shell stable
+// and that disable() restores cleanly (re-own, no Meta.restart), so the GTK
+// takeover is enabled. See docs/gnome48-audit.md "GTK path".
+const ALLOW_GTK_TAKEOVER = true;
 
 export default class NotistackTakeoverExtension extends Extension {
     enable() {
@@ -55,12 +56,6 @@ export default class NotistackTakeoverExtension extends Extension {
 
     disable() {
         Handshake.restore({ gtkWasTakenOver: this._gtkTakenOver })
-            .then(({ needsShellRestart }) => {
-                if (needsShellRestart) {
-                    log('gnome-notistack: GTK notifications require a shell restart ' +
-                        'to fully restore (no in-process re-instantiation path).');
-                }
-            })
             .catch(e => logError(e, 'gnome-notistack: restore failed'));
         this._gtkTakenOver = false;
     }

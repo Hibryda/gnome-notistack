@@ -36,6 +36,12 @@ pub async fn serve(
         .await
         .context("building D-Bus connection")?;
 
+    // Own our private control name outright (no contention) so the extension and
+    // notistack-ctl can reach IsReady/Relinquish.
+    if let Err(e) = conn.request_name(dbus::CONTROL_NAME).await {
+        warn!(name = dbus::CONTROL_NAME, error = %e, "control name request failed");
+    }
+
     request_name(&conn, dbus::FDO_NAME).await;
 
     if config.gtk_takeover {
