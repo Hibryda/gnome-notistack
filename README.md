@@ -41,12 +41,21 @@ gsettings set org.gnome.shell.extensions.notistack font-family 'Cantarell'
 
 Configurable:
 - **Appearance** — color theme (auto/light/dark, Adwaita palette), background/text
-  color overrides, font family + title/body sizes (`0`/empty = from the system).
-- **Layout** — width as a fraction of monitor *height* capped by a fraction of its
-  *width* (or an absolute px), gap, margin, max stack. Popups start under the top
-  bar (`_NET_WORKAREA`).
+  color overrides, font family + title/body sizes (`0`/empty = from the system),
+  title↔body gap.
+- **Layout** — target monitor (`primary` or a connector like `DP-1`), width as a
+  fraction of monitor *height* capped by a fraction of its *width* (or an absolute
+  px), gap, margin, max stack. Popups start under the top bar (`_NET_WORKAREA`).
 - **Timing** — default / low-urgency timeouts, fade duration.
 - **Behavior** — history size, suppress-on-fullscreen, native-GTK takeover.
+
+## Notification content
+Popups render the full FDO/GTK notification: icon/image, Pango markup
+(`<b> <i> <u>`), `<a href>` **hyperlinks** (clickable → opens in the browser),
+inline `<img>` **images**, line breaks (`<br>` and `\n`), and **action buttons**
+(FDO `actions` / GTK `buttons`) — clicking a button invokes its action; clicking
+the card invokes the default action. Urgency-aware expiry, `replaces_id`, sounds,
+and DND/lock/fullscreen suppression apply throughout.
 
 ## License
 MIT (planned).
