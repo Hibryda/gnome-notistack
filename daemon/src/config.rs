@@ -29,6 +29,10 @@ pub struct Config {
     pub body_size_pt: f64,
     /// Fade in/out duration, in ms (0 disables fading — instant show/hide).
     pub fade_ms: u64,
+    /// Number of past notifications to keep in the persisted history.
+    pub history_size: usize,
+    /// Suppress popups while a fullscreen window is focused.
+    pub suppress_on_fullscreen: bool,
     /// Attempt the `org.gtk.Notifications` takeover (gated by the extension + M0.5 audit).
     /// When false, the daemon runs Fdo-only (partial coverage).
     pub gtk_takeover: bool,
@@ -47,6 +51,8 @@ impl Default for Config {
             summary_size_pt: 12.0,
             body_size_pt: 10.0,
             fade_ms: 150,
+            history_size: 100,
+            suppress_on_fullscreen: true,
             gtk_takeover: true,
         }
     }

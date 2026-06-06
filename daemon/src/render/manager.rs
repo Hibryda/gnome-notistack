@@ -20,6 +20,7 @@ use super::cairo::{self, Card};
 use super::x11::Ui;
 use super::{Command, Feedback};
 use crate::config::Config;
+use crate::history::History;
 use crate::notification::{Notification, NotificationId, Urgency};
 
 /// FDO close reasons (org.freedesktop.Notifications spec).
@@ -62,10 +63,18 @@ struct Manager {
     popups: Vec<Popup>,
     /// Back-channel to the async signal emitter (NotificationClosed/ActionInvoked).
     feedback: UnboundedSender<Feedback>,
-    /// DND or screen lock active: queue instead of displaying.
-    suppressed: bool,
+    /// DND or screen lock active (from the suppression watcher).
+    dnd_lock: bool,
+    /// A fullscreen window is focused (checked on the X11 side, throttled).
+    fullscreen: bool,
+    /// Last effective suppression state (for edge-triggered replay).
+    was_suppressed: bool,
     /// Notifications received while suppressed, replayed on unsuppress (no loss).
     queued: Vec<Notification>,
+    /// Persisted metadata-only history.
+    history: History,
+    /// Last fullscreen poll (throttle the X11 round-trips).
+    last_fs_check: Instant,
 }
 
 impl Manager {
@@ -75,15 +84,60 @@ impl Manager {
         mon: (i16, i16, u16, u16),
         feedback: UnboundedSender<Feedback>,
     ) -> Self {
+        let history = History::load(config.history_size);
         Self {
             ui,
             config,
             mon,
             popups: Vec::new(),
             feedback,
-            suppressed: false,
+            dnd_lock: false,
+            fullscreen: false,
+            was_suppressed: false,
             queued: Vec::new(),
+            history,
+            last_fs_check: Instant::now(),
         }
+    }
+
+    /// Effective suppression: DND/lock or a focused fullscreen window.
+    fn suppressed(&self) -> bool {
+        self.dnd_lock || self.fullscreen
+    }
+
+    /// Re-evaluate suppression; on the suppressed→unsuppressed edge, replay the queue.
+    fn update_suppression(&mut self) -> Result<()> {
+        let now = self.suppressed();
+        if !now && self.was_suppressed {
+            let queued = std::mem::take(&mut self.queued);
+            info!(
+                count = queued.len(),
+                "unsuppressed — replaying queued notifications"
+            );
+            for n in queued {
+                self.show(n)?;
+            }
+        }
+        self.was_suppressed = now;
+        Ok(())
+    }
+
+    /// Poll the focused-window fullscreen state (throttled), then re-evaluate.
+    fn check_fullscreen(&mut self) -> Result<()> {
+        if !self.config.suppress_on_fullscreen {
+            return Ok(());
+        }
+        if self.last_fs_check.elapsed() < Duration::from_millis(400) {
+            return Ok(());
+        }
+        self.last_fs_check = Instant::now();
+        let fs = self.ui.active_window_fullscreen();
+        if fs != self.fullscreen {
+            self.fullscreen = fs;
+            info!(fullscreen = fs, "fullscreen suppression changed");
+            self.update_suppression()?;
+        }
+        Ok(())
     }
 
     fn popup_x(&self) -> i16 {
@@ -143,29 +197,18 @@ impl Manager {
         }
     }
 
-    /// Enter/leave suppression. On leaving, replay the queued notifications.
-    fn set_suppressed(&mut self, suppressed: bool) -> Result<()> {
-        if self.suppressed == suppressed {
-            return Ok(());
-        }
-        self.suppressed = suppressed;
-        if suppressed {
-            info!("suppressed (DND/lock) — queueing notifications");
-        } else {
-            let queued = std::mem::take(&mut self.queued);
-            info!(
-                count = queued.len(),
-                "unsuppressed — replaying queued notifications"
-            );
-            for n in queued {
-                self.show(n)?;
-            }
+    /// Set the DND/lock suppression state (from the watcher); replay on release.
+    fn set_dnd_lock(&mut self, suppressed: bool) -> Result<()> {
+        if self.dnd_lock != suppressed {
+            self.dnd_lock = suppressed;
+            info!(suppressed, "DND/lock suppression changed");
+            self.update_suppression()?;
         }
         Ok(())
     }
 
     fn show(&mut self, n: Notification) -> Result<()> {
-        if self.suppressed {
+        if self.suppressed() {
             self.enqueue(n);
             return Ok(());
         }
@@ -414,6 +457,7 @@ pub fn run(
         loop {
             match rx.try_recv() {
                 Ok(Command::Show(n)) => {
+                    mgr.history.record(&n);
                     if let Err(e) = mgr.show(*n) {
                         warn!(error = %e, "failed to show popup");
                     }
@@ -424,7 +468,7 @@ pub fn run(
                     }
                 }
                 Ok(Command::SetSuppressed(s)) => {
-                    if let Err(e) = mgr.set_suppressed(s) {
+                    if let Err(e) = mgr.set_dnd_lock(s) {
                         warn!(error = %e, "failed to apply suppression");
                     }
                 }
@@ -445,6 +489,7 @@ pub fn run(
         }
         mgr.expire_due()?;
         mgr.advance_fades()?;
+        mgr.check_fullscreen()?;
 
         // Tick faster while animating (≈60fps), idle otherwise.
         let tick = if mgr.has_active_fades() { 16 } else { 50 };

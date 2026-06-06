@@ -25,6 +25,10 @@ pub struct Ui {
     pub colormap: Colormap,
     /// Cached `_NET_WM_WINDOW_OPACITY` atom (set per-frame during fades).
     opacity_atom: u32,
+    /// Cached atoms for the fullscreen-suppression check.
+    active_window_atom: u32,
+    wm_state_atom: u32,
+    fullscreen_atom: u32,
 }
 
 impl Ui {
@@ -40,10 +44,12 @@ impl Ui {
         conn.create_colormap(ColormapAlloc::NONE, colormap, root, visual_id)?
             .check()
             .context("create colormap")?;
-        let opacity_atom = conn
-            .intern_atom(false, b"_NET_WM_WINDOW_OPACITY")?
-            .reply()?
-            .atom;
+        let intern =
+            |name: &[u8]| -> Result<u32> { Ok(conn.intern_atom(false, name)?.reply()?.atom) };
+        let opacity_atom = intern(b"_NET_WM_WINDOW_OPACITY")?;
+        let active_window_atom = intern(b"_NET_ACTIVE_WINDOW")?;
+        let wm_state_atom = intern(b"_NET_WM_STATE")?;
+        let fullscreen_atom = intern(b"_NET_WM_STATE_FULLSCREEN")?;
         Ok(Self {
             conn,
             screen_num,
@@ -51,7 +57,47 @@ impl Ui {
             visual_id,
             colormap,
             opacity_atom,
+            active_window_atom,
+            wm_state_atom,
+            fullscreen_atom,
         })
+    }
+
+    /// Whether the currently focused window is fullscreen (best-effort; false on
+    /// any error, incl. BadWindow if the active window vanished).
+    pub fn active_window_fullscreen(&self) -> bool {
+        let Ok(active) = self.conn.get_property(
+            false,
+            self.root,
+            self.active_window_atom,
+            AtomEnum::WINDOW,
+            0,
+            1,
+        ) else {
+            return false;
+        };
+        let Some(win) = active
+            .reply()
+            .ok()
+            .and_then(|r| r.value32().and_then(|mut v| v.next()))
+        else {
+            return false;
+        };
+        if win == 0 {
+            return false;
+        }
+        let Ok(state) =
+            self.conn
+                .get_property(false, win, self.wm_state_atom, AtomEnum::ATOM, 0, 64)
+        else {
+            return false;
+        };
+        state
+            .reply()
+            .ok()
+            .and_then(|r| r.value32().map(|v| v.collect::<Vec<_>>()))
+            .map(|atoms| atoms.contains(&self.fullscreen_atom))
+            .unwrap_or(false)
     }
 
     fn intern(&self, name: &[u8]) -> Result<u32> {

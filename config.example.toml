@@ -13,6 +13,12 @@ low_urgency_timeout_ms = 3000
 # Fade in/out duration (ms). 0 disables fading (instant show/hide).
 fade_ms = 150                      # --fade-ms
 
+# --- Behavior -------------------------------------------------------------
+# Past notifications kept in ~/.local/state/gnome-notistack/history.json.
+history_size = 100
+# Suppress popups while a fullscreen window is focused (queued + replayed).
+suppress_on_fullscreen = true
+
 # --- Layout ---------------------------------------------------------------
 # Max simultaneously displayed popups (older ones are dropped past this).
 max_stack = 5                      # --max-stack
