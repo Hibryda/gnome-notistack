@@ -17,6 +17,8 @@ After=graphical-session.target
 
 [Service]
 Type=simple
+# Find our GSettings schema (shipped with the extension).
+Environment=GSETTINGS_SCHEMA_DIR=/usr/share/gnome-shell/extensions/notistack@hemoglobina.store/schemas
 ExecStart=/usr/lib/gnome-notistack/gnome-notistack
 Restart=on-failure
 RestartSec=2

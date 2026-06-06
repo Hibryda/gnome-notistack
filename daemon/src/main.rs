@@ -26,11 +26,9 @@ fn main() -> anyhow::Result<()> {
     use clap::Parser;
     init_tracing();
 
-    // Precedence: defaults < config file < CLI flags.
     let cli = cli::Cli::parse();
-    let mut config =
-        config::Config::load_from(cli.config.as_deref()).context("loading configuration")?;
-    cli.apply_to(&mut config);
+    // Config comes from GSettings (live-reloaded by the render thread).
+    let config = config::Config::load();
 
     // Standalone visual smoke test (no D-Bus takeover needed).
     if cli.demo_popup {

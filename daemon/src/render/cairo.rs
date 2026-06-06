@@ -24,11 +24,30 @@ pub struct Card<'a> {
     /// Summary / body font sizes, in points.
     pub summary_pt: f64,
     pub body_pt: f64,
+    /// Background / foreground colors (RGBA 0–1), from the theme or overrides.
+    pub bg: [f64; 4],
+    pub fg: [f64; 4],
 }
 
 /// Pango `size` attribute is in 1024ths of a point.
 fn pango_size(pt: f64) -> i32 {
     (pt * 1024.0).round() as i32
+}
+
+/// `#rrggbb` from an RGBA color (alpha ignored — Pango foreground is opaque).
+fn rgb_hex(c: [f64; 4]) -> String {
+    let q = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("#{:02x}{:02x}{:02x}", q(c[0]), q(c[1]), q(c[2]))
+}
+
+/// Blend `a` toward `b` by `t` (0=a, 1=b) — used to dim the body text.
+fn mix(a: [f64; 4], b: [f64; 4], t: f64) -> [f64; 4] {
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+        a[3],
+    ]
 }
 
 /// Inner padding around the card content, in pixels.
@@ -40,10 +59,13 @@ const MIN_HEIGHT: i32 = 44;
 /// (may exceed `width * 4` due to cairo padding), and the chosen `height`.
 pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32)> {
     // Summary is plain text (escaped); body is FDO markup → Pango markup.
+    // Summary uses the foreground color; body is dimmed toward the background.
     let font = crate::markup::escape(card.font);
+    let summary_hex = rgb_hex(card.fg);
+    let body_hex = rgb_hex(mix(card.fg, card.bg, 0.28));
     let markup = format!(
-        "<span font_family='{font}' weight='bold' size='{ss}' foreground='#ffffff'>{summary}</span>\n\
-         <span font_family='{font}' size='{bs}' foreground='#d8d8dc'>{body}</span>",
+        "<span font_family='{font}' weight='bold' size='{ss}' foreground='{summary_hex}'>{summary}</span>\n\
+         <span font_family='{font}' size='{bs}' foreground='{body_hex}'>{body}</span>",
         ss = pango_size(card.summary_pt),
         bs = pango_size(card.body_pt),
         summary = crate::markup::escape(card.summary),
@@ -77,12 +99,13 @@ pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32)> {
         cr.paint().ok();
         cr.set_operator(::cairo::Operator::Over);
 
-        // Rounded translucent background.
+        // Rounded translucent background (theme color).
         let (w, h, r) = (card.width as f64, height as f64, 12.0);
         rounded_rect(&cr, 0.5, 0.5, w - 1.0, h - 1.0, r);
-        cr.set_source_rgba(0.12, 0.12, 0.14, 0.96);
+        cr.set_source_rgba(card.bg[0], card.bg[1], card.bg[2], card.bg[3]);
         cr.fill_preserve().ok();
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.08);
+        // Subtle border from the foreground color.
+        cr.set_source_rgba(card.fg[0], card.fg[1], card.fg[2], 0.10);
         cr.set_line_width(1.0);
         cr.stroke().ok();
 
@@ -109,7 +132,7 @@ pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32)> {
         layout.set_width(text_width);
         layout.set_wrap(::pango::WrapMode::WordChar);
         cr.move_to(text_x as f64, PAD as f64);
-        cr.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+        cr.set_source_rgba(card.fg[0], card.fg[1], card.fg[2], card.fg[3]);
         ::pangocairo::functions::show_layout(&cr, &layout);
     }
 

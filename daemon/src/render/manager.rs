@@ -52,6 +52,9 @@ struct Popup {
     /// The `default` action key, if the notification declared one (whole-card click).
     default_action: Option<String>,
     fade: Fade,
+    /// The source notification, kept so the card can be re-rendered on a live
+    /// config change (font/colors/width).
+    notification: Notification,
 }
 
 struct Manager {
@@ -75,6 +78,10 @@ struct Manager {
     history: History,
     /// Last fullscreen poll (throttle the X11 round-trips).
     last_fs_check: Instant,
+    /// Open GSettings handles (ours + interface) for live config re-read.
+    settings: Option<(gio::Settings, Option<gio::Settings>)>,
+    /// Last config poll (throttle the GSettings re-read).
+    last_config_check: Instant,
 }
 
 impl Manager {
@@ -97,7 +104,43 @@ impl Manager {
             queued: Vec::new(),
             history,
             last_fs_check: Instant::now(),
+            settings: crate::config::open(),
+            last_config_check: Instant::now(),
         }
+    }
+
+    /// Re-read GSettings (throttled); on change, apply live and re-render popups.
+    fn reload_config(&mut self) -> Result<()> {
+        if self.last_config_check.elapsed() < Duration::from_millis(1000) {
+            return Ok(());
+        }
+        self.last_config_check = Instant::now();
+        let Some((ours, iface)) = &self.settings else {
+            return Ok(());
+        };
+        let new = Config::from_settings(ours, iface.as_ref());
+        if new == self.config {
+            return Ok(());
+        }
+        info!("config changed — applying live");
+        self.config = new;
+        // Re-render every popup with the new font/colors/width.
+        for i in 0..self.popups.len() {
+            let n = self.popups[i].notification.clone();
+            let (pixels, stride, height) = self.render_pixels(&n)?;
+            let win = self.popups[i].window;
+            let w = self.popup_width() as u32;
+            self.ui.conn.configure_window(
+                win,
+                &ConfigureWindowAux::new().width(w).height(height as u32),
+            )?;
+            self.ui.put_argb(win, height, stride, &pixels)?;
+            let p = &mut self.popups[i];
+            p.pixels = pixels;
+            p.stride = stride;
+            p.height = height;
+        }
+        self.reflow()
     }
 
     /// Effective suppression: DND/lock or a focused fullscreen window.
@@ -199,6 +242,8 @@ impl Manager {
             font: &self.config.font_family,
             summary_pt: self.config.summary_size_pt,
             body_pt: self.config.body_size_pt,
+            bg: self.config.bg,
+            fg: self.config.fg,
         })?;
         Ok((pixels, stride, height as u16))
     }
@@ -308,6 +353,7 @@ impl Manager {
             });
         }
 
+        info!(id = ?n.id, app = %n.app_name, "popup shown");
         self.popups.insert(
             0,
             Popup {
@@ -319,9 +365,9 @@ impl Manager {
                 expires_at,
                 default_action,
                 fade,
+                notification: n,
             },
         );
-        info!(?n.id, app = %n.app_name, count = self.popups.len(), "popup shown");
         self.reflow()
     }
 
@@ -524,6 +570,7 @@ pub fn run(
         mgr.expire_due()?;
         mgr.advance_fades()?;
         mgr.check_fullscreen()?;
+        mgr.reload_config()?;
 
         // Tick faster while animating (≈60fps), idle otherwise.
         let tick = if mgr.has_active_fades() { 16 } else { 50 };

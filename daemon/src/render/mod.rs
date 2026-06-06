@@ -71,6 +71,8 @@ pub fn demo(config: &crate::config::Config) -> Result<()> {
         font: &config.font_family,
         summary_pt: config.summary_size_pt,
         body_pt: config.body_size_pt,
+        bg: config.bg,
+        fg: config.fg,
     })?;
     let h = h as u16;
     let x = mx + mw as i16 - w as i16 - margin;

@@ -20,3 +20,6 @@
 
 # Tribunal / hypertribunal run artifacts
 .tribunal/
+
+# Compiled GSettings schema (build artifact)
+extension/schemas/gschemas.compiled

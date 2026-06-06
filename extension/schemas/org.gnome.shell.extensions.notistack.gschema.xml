@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.notistack"
+          path="/org/gnome/shell/extensions/notistack/">
+
+    <!-- Timing -->
+    <key name="default-timeout-ms" type="u">
+      <default>5000</default>
+      <summary>Default popup timeout (ms)</summary>
+    </key>
+    <key name="low-urgency-timeout-ms" type="u">
+      <default>3000</default>
+      <summary>Low-urgency popup timeout (ms)</summary>
+    </key>
+    <key name="fade-ms" type="u">
+      <default>150</default>
+      <summary>Fade in/out duration (ms); 0 disables</summary>
+    </key>
+
+    <!-- Layout -->
+    <key name="max-stack" type="u">
+      <default>5</default>
+      <summary>Max simultaneous popups</summary>
+    </key>
+    <key name="width-px" type="u">
+      <default>0</default>
+      <summary>Absolute popup width (px); 0 = derive from geometry</summary>
+    </key>
+    <key name="width-height-fraction" type="d">
+      <range min="0.05" max="1.0"/>
+      <default>0.30</default>
+      <summary>Popup width as a fraction of monitor height</summary>
+    </key>
+    <key name="max-width-fraction" type="d">
+      <range min="0.05" max="1.0"/>
+      <default>0.18</default>
+      <summary>Cap on popup width as a fraction of monitor width</summary>
+    </key>
+    <key name="gap-px" type="u">
+      <default>10</default>
+      <summary>Vertical gap between popups (px)</summary>
+    </key>
+    <key name="margin-px" type="u">
+      <default>16</default>
+      <summary>Margin from the screen corner (px)</summary>
+    </key>
+
+    <!-- Text (empty/0 = take from the system theme) -->
+    <key name="font-family" type="s">
+      <default>''</default>
+      <summary>Font family ('' = system interface font)</summary>
+    </key>
+    <key name="summary-size-pt" type="d">
+      <range min="0.0" max="72.0"/>
+      <default>0.0</default>
+      <summary>Title font size in pt (0 = derived from system font)</summary>
+    </key>
+    <key name="body-size-pt" type="d">
+      <range min="0.0" max="72.0"/>
+      <default>0.0</default>
+      <summary>Body font size in pt (0 = derived from system font)</summary>
+    </key>
+
+    <!-- Colors (empty = take from the theme via color-scheme) -->
+    <key name="theme-mode" type="s">
+      <choices>
+        <choice value="auto"/>
+        <choice value="light"/>
+        <choice value="dark"/>
+      </choices>
+      <default>'auto'</default>
+      <summary>Color mode: auto (follow system), light, or dark</summary>
+    </key>
+    <key name="background-color" type="s">
+      <default>''</default>
+      <summary>Background color override (#rrggbb or #rrggbbaa); '' = theme</summary>
+    </key>
+    <key name="foreground-color" type="s">
+      <default>''</default>
+      <summary>Text color override (#rrggbb or #rrggbbaa); '' = theme</summary>
+    </key>
+
+    <!-- Behavior -->
+    <key name="history-size" type="u">
+      <default>100</default>
+      <summary>Notifications kept in history</summary>
+    </key>
+    <key name="suppress-on-fullscreen" type="b">
+      <default>true</default>
+      <summary>Suppress popups while a fullscreen window is focused</summary>
+    </key>
+    <key name="gtk-takeover" type="b">
+      <default>true</default>
+      <summary>Also take over org.gtk.Notifications (native-GTK apps)</summary>
+    </key>
+  </schema>
+</schemalist>
