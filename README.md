@@ -2,7 +2,7 @@
 
 A standalone notification daemon for **GNOME Shell 48 / X11** that shows **multiple stacked notifications at once** — replacing gnome-shell's one-banner-at-a-time display — without losing any notifications you'd otherwise see.
 
-> **Status:** working end-to-end for the FreeDesktop (`org.freedesktop.Notifications`) path. Real `notify-send` traffic renders as a live vertical stack of popups (icons, markup, urgency-aware expiry, click-to-dismiss, close/action signals). The `org.gtk.Notifications` takeover (native-GTK/Flatpak apps) is designed and validated at the mechanism level but not yet wired in.
+> **Status:** working with **full dual-name coverage**, validated live on GNOME 48.7/X11. Both `org.freedesktop.Notifications` (`notify-send`) and `org.gtk.Notifications` (native-GTK/Flatpak) traffic render as a live vertical stack of popups — icons, markup, urgency-aware expiry, fade in/out, click-to-dismiss, close/action signals, DND/lock suppression, sound; CLI/TOML-configurable. Both bus-name takeovers are validated and cleanly reversible (GTK with no shell restart needed to restore). Remaining: GTK buttons/action-dispatch (M7.1), packaging finalize, history/a11y.
 > See [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) for milestone status, [`docs/gnome48-audit.md`](docs/gnome48-audit.md) for the takeover audit, and [`RESEARCH-BRIEF.md`](RESEARCH-BRIEF.md) for the design synthesis.
 
 ## The idea
