@@ -85,21 +85,11 @@ fn mix(a: [f64; 4], b: [f64; 4], t: f64) -> [f64; 4] {
 const PAD: i32 = 14;
 /// Minimum card height (so a one-line notification still looks like a card).
 const MIN_HEIGHT: i32 = 44;
-/// Button padding (x, y) and inter-button gap; gap between stacked inline images.
-const BTN_PAD_X: i32 = 12;
-const BTN_PAD_Y: i32 = 6;
-const BTN_GAP: i32 = 8;
+/// Vertical padding inside the bottom action bar; horizontal inset for a button
+/// label from its segment edges; gap between stacked inline images.
+const BAR_PAD_Y: i32 = 11;
+const BTN_INSET: i32 = 8;
 const IMG_GAP: i32 = 6;
-
-/// A placed button (relative to the button area origin) for measure→draw reuse.
-struct PlacedBtn {
-    key: String,
-    label: String,
-    rx: i32,
-    ry: i32,
-    w: i32,
-    h: i32,
-}
 
 /// A rendered card: premultiplied BGRA (cairo `ARgb32`), the row `stride`, the
 /// chosen `height`, and the clickable regions (buttons + links).
@@ -158,36 +148,23 @@ pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32, Vec<Region>)> {
         img_draw.push((data, *w, *h, dw, dh));
     }
 
-    // Action buttons: measure, then pack into rows within the text column.
-    let btn_area_w = text_w_px;
-    let mut placed: Vec<PlacedBtn> = Vec::new();
-    let (mut bx, mut by, mut row_h) = (0, 0, 0);
-    for (key, label) in card.buttons {
+    // Action buttons render as a full-width bottom bar (measured here).
+    let mut bar_label_h = 0;
+    for (_, label) in card.buttons {
         let lm = format!(
             "<span font_family='{font}' size='{bs}' foreground='{btn_hex}'>{label}</span>",
             bs = pango_size(card.body_pt),
             label = crate::markup::escape(label),
         );
-        let (lw, lh) = make_layout(&lm).pixel_size();
-        let (w, h) = (lw + 2 * BTN_PAD_X, lh + 2 * BTN_PAD_Y);
-        if bx > 0 && bx + w > btn_area_w {
-            by += row_h + BTN_GAP;
-            bx = 0;
-            row_h = 0;
-        }
-        placed.push(PlacedBtn {
-            key: key.clone(),
-            label: label.clone(),
-            rx: bx,
-            ry: by,
-            w,
-            h,
-        });
-        bx += w + BTN_GAP;
-        row_h = row_h.max(h);
+        bar_label_h = bar_label_h.max(make_layout(&lm).pixel_size().1);
     }
-    let buttons_h = if placed.is_empty() { 0 } else { by + row_h };
+    let bar_h = if card.buttons.is_empty() {
+        0
+    } else {
+        bar_label_h + 2 * BAR_PAD_Y
+    };
 
+    // Content area (icon + title + body + images), then the bar below it.
     let mut content_h = title_h;
     if has_body {
         content_h += gap + body_h;
@@ -195,10 +172,8 @@ pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32, Vec<Region>)> {
     if images_h > 0 {
         content_h += gap + images_h;
     }
-    if buttons_h > 0 {
-        content_h += gap + buttons_h;
-    }
-    let height = (content_h.max(icon_size) + 2 * PAD).max(MIN_HEIGHT);
+    let content_area = (content_h.max(icon_size) + 2 * PAD).max(MIN_HEIGHT);
+    let height = content_area + bar_h;
 
     // --- Draw pass ---
     let mut surface = ::cairo::ImageSurface::create(::cairo::Format::ARgb32, card.width, height)
@@ -303,40 +278,58 @@ pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32, Vec<Region>)> {
             }
         }
 
-        // Action buttons.
-        if buttons_h > 0 {
-            y += gap;
-            for b in &placed {
-                let (ax, ay) = (text_x + b.rx, y + b.ry);
-                rounded_rect(
-                    &cr,
-                    ax as f64 + 0.5,
-                    ay as f64 + 0.5,
-                    (b.w - 1) as f64,
-                    (b.h - 1) as f64,
-                    6.0,
-                );
-                cr.set_source_rgba(card.fg[0], card.fg[1], card.fg[2], 0.08);
-                cr.fill_preserve().ok();
-                cr.set_source_rgba(card.fg[0], card.fg[1], card.fg[2], 0.35);
-                cr.set_line_width(1.0);
-                cr.stroke().ok();
+        // Action bar: a full-width bottom strip of equal segments separated by
+        // hairlines, clipped to the card so the bottom corners stay rounded.
+        if bar_h > 0 {
+            let bar_top = content_area;
+            let n = card.buttons.len() as i32;
+            cr.save().ok();
+            rounded_rect(&cr, 0.5, 0.5, w - 1.0, h - 1.0, r);
+            cr.clip();
+            // Subtle bar fill + top separator.
+            cr.set_source_rgba(card.fg[0], card.fg[1], card.fg[2], 0.05);
+            cr.rectangle(0.0, bar_top as f64, w, bar_h as f64);
+            cr.fill().ok();
+            cr.set_source_rgba(card.fg[0], card.fg[1], card.fg[2], 0.14);
+            cr.set_line_width(1.0);
+            cr.move_to(0.0, bar_top as f64 + 0.5);
+            cr.line_to(w, bar_top as f64 + 0.5);
+            cr.stroke().ok();
+
+            let seg = card.width / n;
+            for (i, (key, label)) in card.buttons.iter().enumerate() {
+                let i = i as i32;
+                let x0 = i * seg;
+                let seg_w = if i == n - 1 { card.width - x0 } else { seg };
+                if i > 0 {
+                    cr.move_to(x0 as f64 + 0.5, bar_top as f64);
+                    cr.line_to(x0 as f64 + 0.5, height as f64);
+                    cr.stroke().ok();
+                }
+                // Centered, ellipsized label within the segment.
                 let lm = format!(
                     "<span font_family='{font}' size='{bs}' foreground='{btn_hex}'>{label}</span>",
                     bs = pango_size(card.body_pt),
-                    label = crate::markup::escape(&b.label),
+                    label = crate::markup::escape(label),
                 );
-                let ll = make_on(&cr, &lm, -1);
-                cr.move_to((ax + BTN_PAD_X) as f64, (ay + BTN_PAD_Y) as f64);
+                let ll = ::pangocairo::functions::create_layout(&cr);
+                ll.set_markup(&lm);
+                ll.set_width(((seg_w - 2 * BTN_INSET).max(1)) * ::pango::SCALE);
+                ll.set_alignment(::pango::Alignment::Center);
+                ll.set_ellipsize(::pango::EllipsizeMode::End);
+                let lh = ll.pixel_size().1;
+                cr.move_to((x0 + BTN_INSET) as f64, (bar_top + (bar_h - lh) / 2) as f64);
+                cr.set_source_rgba(card.fg[0], card.fg[1], card.fg[2], card.fg[3]);
                 ::pangocairo::functions::show_layout(&cr, &ll);
                 regions.push(Region {
-                    x: ax,
-                    y: ay,
-                    w: b.w,
-                    h: b.h,
-                    kind: RegionKind::Button(b.key.clone()),
+                    x: x0,
+                    y: bar_top,
+                    w: seg_w,
+                    h: bar_h,
+                    kind: RegionKind::Button(key.clone()),
                 });
             }
+            cr.restore().ok();
         }
     }
 
