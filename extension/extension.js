@@ -17,6 +17,7 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 
 import * as Handshake from './handshake.js';
+import { Mirror } from './mirror.js';
 
 // Validated live (M0.5): mid-session ReleaseName is safe and disable() restores
 // cleanly (re-own, no Meta.restart). See docs/gnome48-audit.md "GTK path".
@@ -40,6 +41,10 @@ export default class NotistackTakeoverExtension extends Extension {
             return;
         }
 
+        // Mirror shown notifications into GNOME's notification list (date menu).
+        this._mirror = new Mirror();
+        this._mirror.enable();
+
         this._gtkTakenOver = ALLOW_GTK_TAKEOVER;
         // Defer out of the shell-init window; the takeover itself is gated on the
         // daemon being ready, so it never destabilizes the shell.
@@ -56,6 +61,10 @@ export default class NotistackTakeoverExtension extends Extension {
         if (this._takeoverTimeout) {
             GLib.source_remove(this._takeoverTimeout);
             this._takeoverTimeout = 0;
+        }
+        if (this._mirror) {
+            this._mirror.disable();
+            this._mirror = null;
         }
         Handshake.restore({ gtkWasTakenOver: this._gtkTakenOver })
             .catch(e => logError(e, 'gnome-notistack: restore failed'));

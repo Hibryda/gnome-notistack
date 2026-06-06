@@ -17,7 +17,7 @@ use crate::dbus::{self, fdo::FdoNotifications, gtk::GtkNotifications, private::C
 use crate::render::Command;
 
 /// Object path for our private control interface.
-pub const CONTROL_PATH: &str = "/store/hemoglobina/notistack/Control";
+pub const CONTROL_PATH: &str = dbus::CONTROL_PATH;
 
 /// Connect, serve the interfaces, and queue for the notification name(s).
 /// Returns the live connection (kept alive by the caller for the daemon's life).

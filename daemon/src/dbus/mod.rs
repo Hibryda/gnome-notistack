@@ -19,3 +19,5 @@ pub const GTK_PATH: &str = "/org/gtk/Notifications";
 
 /// Our private control name (owned outright) for the extension + `notistack-ctl`.
 pub const CONTROL_NAME: &str = "store.hemoglobina.notistack.Control";
+/// Object path of the control interface (also the `Posted` mirror signal path).
+pub const CONTROL_PATH: &str = "/store/hemoglobina/notistack/Control";

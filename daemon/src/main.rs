@@ -168,6 +168,25 @@ fn spawn_signal_emitter(
                     activate_gtk_action(&conn, &app_id, &action).await;
                 }
                 render::Feedback::OpenUrl(url) => open_url(&url),
+                render::Feedback::Mirror {
+                    app_name,
+                    app_icon,
+                    summary,
+                    body,
+                } => {
+                    if let Err(e) = conn
+                        .emit_signal(
+                            Option::<&str>::None,
+                            dbus::CONTROL_PATH,
+                            dbus::CONTROL_NAME,
+                            "Posted",
+                            &(app_name, app_icon, summary, body),
+                        )
+                        .await
+                    {
+                        error!(error = %e, "failed to emit Posted mirror signal");
+                    }
+                }
             }
         }
     });

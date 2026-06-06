@@ -392,6 +392,13 @@ impl Manager {
         }
 
         info!(id = ?n.id, app = %n.app_name, "popup shown");
+        // Mirror into GNOME's notification list (date menu) — no extra banner.
+        self.emit(Feedback::Mirror {
+            app_name: n.app_name.clone(),
+            app_icon: n.app_icon.clone(),
+            summary: n.summary.clone(),
+            body: n.body.clone(),
+        });
         self.popups.insert(
             0,
             Popup {

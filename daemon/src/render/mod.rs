@@ -45,6 +45,14 @@ pub enum Feedback {
     GtkActivate { app_id: String, action: String },
     /// Open a body hyperlink (clicked `<a href>`) in the default browser.
     OpenUrl(String),
+    /// Mirror a shown notification into GNOME's notification list (date menu),
+    /// via the control `Posted` signal the extension listens for.
+    Mirror {
+        app_name: String,
+        app_icon: String,
+        summary: String,
+        body: String,
+    },
 }
 
 /// Chosen once at startup by probing (plan risk R5): the cairo XCBSurface fast
