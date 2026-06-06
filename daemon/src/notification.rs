@@ -30,6 +30,17 @@ pub struct Action {
     pub label: String,
 }
 
+/// Raw inline icon from the FDO `image-data` hint `(iiibiiay)` or GTK GIcon bytes.
+#[derive(Debug, Clone)]
+pub struct RawImage {
+    pub width: i32,
+    pub height: i32,
+    pub rowstride: i32,
+    pub has_alpha: bool,
+    pub channels: i32,
+    pub bytes: Vec<u8>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Notification {
     pub id: NotificationId,
@@ -37,6 +48,8 @@ pub struct Notification {
     pub app_icon: String,
     /// `image-path` hint (a file path or `file://` URI), if provided.
     pub image_path: Option<String>,
+    /// Inline `image-data` hint pixels, if provided (highest icon priority).
+    pub image_data: Option<RawImage>,
     pub summary: String,
     pub body: String,
     pub actions: Vec<Action>,

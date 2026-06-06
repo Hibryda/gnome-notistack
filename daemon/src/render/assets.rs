@@ -1,34 +1,36 @@
 //! Icon resolution + decode (M4).
 //!
-//! Resolution priority: `image-path` hint > `app_icon` (a path, or a themed name
-//! resolved via freedesktop-icons) > none. PNG/JPEG decode via the `image` crate.
-//! Inline `image-data` `(iiibiiay)` hint decode and SVG (librsvg/resvg) are
-//! M4-remaining (see docs/IMPLEMENTATION-PLAN.md §7). A 512px cap bounds decode
-//! cost (plan risk R15).
+//! Resolution priority: inline `image-data` hint > `image-path` hint > `app_icon`
+//! (a path, or a themed name via freedesktop-icons) > none. PNG/JPEG via the
+//! `image` crate, SVG via `resvg` (pure-Rust). All outputs are premultiplied
+//! BGRA (cairo ARGB32 byte order) at `size`×`size`. A 512px cap bounds decode
+//! cost and `image-data` dimensions are sanity-capped (plan risk R15).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use image::imageops::FilterType;
+use resvg::{tiny_skia, usvg};
 use tracing::debug;
 
-/// Resolve and decode an icon to premultiplied BGRA (cairo ARGB32 byte order) at
-/// `size`×`size`. Returns `(pixels, size)`, or `None` if no icon resolves/decodes.
-pub fn load_icon(app_icon: &str, image_path: Option<&str>, size: u32) -> Option<(Vec<u8>, i32)> {
+use crate::notification::RawImage;
+
+const MAX_RAW_DIM: i32 = 4096;
+
+/// Resolve and decode an icon to premultiplied BGRA at `size`×`size`.
+pub fn load_icon(
+    app_icon: &str,
+    image_path: Option<&str>,
+    image_data: Option<&RawImage>,
+    size: u32,
+) -> Option<(Vec<u8>, i32)> {
     let size = size.min(512);
-    let path = resolve(app_icon, image_path, size)?;
-    let img = match image::open(&path) {
-        Ok(i) => i,
-        Err(e) => {
-            debug!(path = %path.display(), error = %e, "icon decode failed");
-            return None;
+    if let Some(raw) = image_data {
+        if let Some(out) = raw_to_bgra(raw, size) {
+            return Some(out);
         }
-    };
-    let rgba = img
-        .resize_exact(size, size, FilterType::Lanczos3)
-        .to_rgba8();
-    let mut data = rgba.into_raw();
-    premultiply_bgra(&mut data);
-    Some((data, size as i32))
+    }
+    let path = resolve(app_icon, image_path, size)?;
+    decode_path(&path, size)
 }
 
 fn resolve(app_icon: &str, image_path: Option<&str>, size: u32) -> Option<PathBuf> {
@@ -46,16 +48,93 @@ fn resolve(app_icon: &str, image_path: Option<&str>, size: u32) -> Option<PathBu
     None
 }
 
-/// Treat a string as a filesystem path (stripping a `file://` prefix); returns it
-/// only if it points at an existing file.
+fn decode_path(path: &Path, size: u32) -> Option<(Vec<u8>, i32)> {
+    let is_svg = matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some("svg") | Some("svgz")
+    );
+    if is_svg {
+        return render_svg(path, size);
+    }
+    let img = match image::open(path) {
+        Ok(i) => i,
+        Err(e) => {
+            debug!(path = %path.display(), error = %e, "icon decode failed");
+            return None;
+        }
+    };
+    let rgba = img
+        .resize_exact(size, size, FilterType::Lanczos3)
+        .to_rgba8();
+    let mut data = rgba.into_raw();
+    premultiply_bgra(&mut data);
+    Some((data, size as i32))
+}
+
+/// Render an SVG to premultiplied BGRA, scaled to fit `size`×`size`.
+fn render_svg(path: &Path, size: u32) -> Option<(Vec<u8>, i32)> {
+    let bytes = std::fs::read(path).ok()?;
+    let tree = match usvg::Tree::from_data(&bytes, &usvg::Options::default()) {
+        Ok(t) => t,
+        Err(e) => {
+            debug!(path = %path.display(), error = %e, "svg parse failed");
+            return None;
+        }
+    };
+    let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
+    let ts = tree.size();
+    let scale = (size as f32 / ts.width()).min(size as f32 / ts.height());
+    let transform = tiny_skia::Transform::from_scale(scale, scale);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    // tiny_skia is premultiplied RGBA; cairo wants premultiplied BGRA → swap R/B.
+    let mut data = pixmap.data().to_vec();
+    for px in data.chunks_exact_mut(4) {
+        px.swap(0, 2);
+    }
+    Some((data, size as i32))
+}
+
+/// Convert an inline `image-data` buffer to premultiplied BGRA at `size`×`size`.
+fn raw_to_bgra(raw: &RawImage, size: u32) -> Option<(Vec<u8>, i32)> {
+    let (w, h) = (raw.width, raw.height);
+    if w <= 0 || h <= 0 || w > MAX_RAW_DIM || h > MAX_RAW_DIM || raw.channels < 3 {
+        return None;
+    }
+    let (w, h, ch, stride) = (
+        w as usize,
+        h as usize,
+        raw.channels as usize,
+        raw.rowstride as usize,
+    );
+    if stride < w * ch || raw.bytes.len() < stride * h {
+        return None; // malformed / truncated (rule 02: reject, don't guess)
+    }
+    let mut rgba = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        let row = &raw.bytes[y * stride..];
+        for x in 0..w {
+            let i = x * ch;
+            rgba.push(row[i]);
+            rgba.push(row[i + 1]);
+            rgba.push(row[i + 2]);
+            rgba.push(if ch == 4 { row[i + 3] } else { 255 });
+        }
+    }
+    let img = image::RgbaImage::from_raw(w as u32, h as u32, rgba)?;
+    let resized = image::imageops::resize(&img, size, size, FilterType::Lanczos3);
+    let mut data = resized.into_raw();
+    premultiply_bgra(&mut data);
+    Some((data, size as i32))
+}
+
+/// Treat a string as a filesystem path (stripping `file://`); existing files only.
 fn file_path(s: &str) -> Option<PathBuf> {
     let p = s.strip_prefix("file://").unwrap_or(s);
     let pb = PathBuf::from(p);
     pb.is_file().then_some(pb)
 }
 
-/// Convert non-premultiplied RGBA (image crate) to premultiplied BGRA in place
-/// (cairo ARGB32 native byte order on little-endian).
+/// Non-premultiplied RGBA → premultiplied BGRA in place (cairo ARGB32 on LE).
 fn premultiply_bgra(data: &mut [u8]) {
     for px in data.chunks_exact_mut(4) {
         let (r, g, b, a) = (px[0], px[1], px[2], px[3]);

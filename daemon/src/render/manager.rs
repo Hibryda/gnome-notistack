@@ -105,7 +105,12 @@ impl Manager {
 
     /// Render a card; returns `(pixels, stride, height)` with content-derived height.
     fn render_pixels(&self, n: &Notification) -> Result<(Vec<u8>, i32, u16)> {
-        let icon = super::assets::load_icon(&n.app_icon, n.image_path.as_deref(), 48);
+        let icon = super::assets::load_icon(
+            &n.app_icon,
+            n.image_path.as_deref(),
+            n.image_data.as_ref(),
+            48,
+        );
         let (pixels, stride, height) = cairo::render_card(&Card {
             summary: &n.summary,
             body: &n.body,

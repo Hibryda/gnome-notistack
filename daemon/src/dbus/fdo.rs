@@ -14,7 +14,9 @@ use zbus::interface;
 use zbus::object_server::SignalEmitter;
 use zbus::zvariant::OwnedValue;
 
-use crate::notification::{Action, Notification, NotificationId, Urgency};
+use zbus::zvariant::Value;
+
+use crate::notification::{Action, Notification, NotificationId, RawImage, Urgency};
 use crate::render::Command;
 
 /// Serves the FDO interface; forwards notifications to the render thread.
@@ -70,6 +72,39 @@ fn string_hint(hints: &HashMap<String, OwnedValue>, key: &str) -> Option<String>
         .filter(|s| !s.is_empty())
 }
 
+/// Decode the inline `image-data` `(iiibiiay)` hint (also legacy `icon_data`).
+fn parse_image_data(hints: &HashMap<String, OwnedValue>) -> Option<RawImage> {
+    let v = hints
+        .get("image-data")
+        .or_else(|| hints.get("image_data"))
+        .or_else(|| hints.get("icon_data"))?;
+    let Value::Structure(s) = &**v else {
+        return None;
+    };
+    let f = s.fields();
+    if f.len() < 7 {
+        return None;
+    }
+    let bytes = match &f[6] {
+        Value::Array(arr) => {
+            let mut out = Vec::with_capacity(arr.len());
+            for item in arr.iter() {
+                out.push(u8::try_from(item).ok()?);
+            }
+            out
+        }
+        _ => return None,
+    };
+    Some(RawImage {
+        width: i32::try_from(&f[0]).ok()?,
+        height: i32::try_from(&f[1]).ok()?,
+        rowstride: i32::try_from(&f[2]).ok()?,
+        has_alpha: bool::try_from(&f[3]).ok()?,
+        channels: i32::try_from(&f[5]).ok()?,
+        bytes,
+    })
+}
+
 #[interface(name = "org.freedesktop.Notifications")]
 impl FdoNotifications {
     /// Capabilities we advertise. M4: reconcile with actually-implemented features.
@@ -117,6 +152,7 @@ impl FdoNotifications {
             app_name,
             app_icon,
             image_path: parse_image_path(&hints),
+            image_data: parse_image_data(&hints),
             summary,
             body,
             actions: parse_actions(actions),

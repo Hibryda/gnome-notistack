@@ -57,6 +57,7 @@ impl GtkNotifications {
             // Heuristic icon: the GTK app_id is usually the themed icon name too.
             app_icon: app_id.clone(),
             image_path: None,
+            image_data: None,
             summary: str_field(&notification, "title").unwrap_or_default(),
             body: str_field(&notification, "body").unwrap_or_default(),
             actions: Vec::new(),
