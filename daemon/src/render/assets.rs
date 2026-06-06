@@ -16,12 +16,14 @@ use crate::notification::RawImage;
 
 const MAX_RAW_DIM: i32 = 4096;
 
-/// Resolve and decode an icon to premultiplied BGRA at `size`×`size`.
+/// Resolve and decode an icon to premultiplied BGRA at `size`×`size`. `theme` is
+/// the active icon theme (themed lookups inherit down to hicolor).
 pub fn load_icon(
     app_icon: &str,
     image_path: Option<&str>,
     image_data: Option<&RawImage>,
     size: u32,
+    theme: &str,
 ) -> Option<(Vec<u8>, i32)> {
     let size = size.min(512);
     if let Some(raw) = image_data {
@@ -29,11 +31,11 @@ pub fn load_icon(
             return Some(out);
         }
     }
-    let path = resolve(app_icon, image_path, size)?;
+    let path = resolve(app_icon, image_path, size, theme)?;
     decode_path(&path, size)
 }
 
-fn resolve(app_icon: &str, image_path: Option<&str>, size: u32) -> Option<PathBuf> {
+fn resolve(app_icon: &str, image_path: Option<&str>, size: u32, theme: &str) -> Option<PathBuf> {
     if let Some(p) = image_path.and_then(file_path) {
         return Some(p);
     }
@@ -43,6 +45,7 @@ fn resolve(app_icon: &str, image_path: Option<&str>, size: u32) -> Option<PathBu
         }
         return freedesktop_icons::lookup(app_icon)
             .with_size(size as u16)
+            .with_theme(theme)
             .find();
     }
     None

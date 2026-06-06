@@ -36,6 +36,8 @@ pub struct Config {
     pub margin_px: u16,
     /// Monitor to render on: "primary" or a RandR connector name (e.g. "DP-1").
     pub monitor: String,
+    /// Active icon theme (from the system), used to resolve themed app icons.
+    pub icon_theme: String,
     pub font_family: String,
     pub summary_size_pt: f64,
     pub body_size_pt: f64,
@@ -62,6 +64,7 @@ impl Default for Config {
             max_width_fraction: 0.18,
             margin_px: 16,
             monitor: "primary".to_string(),
+            icon_theme: "hicolor".to_string(),
             font_family: "Sans".to_string(),
             summary_size_pt: 12.0,
             body_size_pt: 10.0,
@@ -118,6 +121,13 @@ impl Config {
         c.history_size = ours.uint("history-size") as usize;
         c.suppress_on_fullscreen = ours.boolean("suppress-on-fullscreen");
         c.gtk_takeover = ours.boolean("gtk-takeover");
+
+        // Active icon theme (for themed app-icon resolution).
+        if let Some(theme) = iface.map(|i| i.string("icon-theme")) {
+            if !theme.is_empty() {
+                c.icon_theme = theme.to_string();
+            }
+        }
 
         // Font: override or system interface font.
         let (sys_family, sys_size) = iface

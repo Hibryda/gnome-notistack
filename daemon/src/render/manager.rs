@@ -250,6 +250,7 @@ impl Manager {
             n.image_path.as_deref(),
             n.image_data.as_ref(),
             48,
+            &self.config.icon_theme,
         );
         // Inline <img> body images (local paths), scaled to fit the column.
         let inline_images: Vec<(Vec<u8>, i32, i32)> = crate::markup::extract_images(&n.body)
