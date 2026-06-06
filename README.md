@@ -2,7 +2,7 @@
 
 A standalone notification daemon for **GNOME Shell 48 / X11** that shows **multiple stacked notifications at once** — replacing gnome-shell's one-banner-at-a-time display — without losing any notifications you'd otherwise see.
 
-> **Status:** working with **full dual-name coverage**, validated live on GNOME 48.7/X11. Both `org.freedesktop.Notifications` (`notify-send`) and `org.gtk.Notifications` (native-GTK/Flatpak) traffic render as a live vertical stack of popups — icons, markup, urgency-aware expiry, fade in/out, click-to-dismiss, close/action signals, DND/lock suppression, sound; CLI/TOML-configurable. Both bus-name takeovers are validated and cleanly reversible (GTK with no shell restart needed to restore). Remaining: GTK buttons/action-dispatch (M7.1), packaging finalize, history/a11y.
+> **Status:** feature-complete (M0–M9 core), validated live on GNOME 48.7/X11. Both `org.freedesktop.Notifications` (`notify-send`) and `org.gtk.Notifications` (native-GTK/Flatpak) traffic render as a live vertical stack of popups — icons (PNG/JPEG/SVG/inline data), Pango markup, dynamic height, urgency-aware expiry, replaces_id, click-to-dismiss + action dispatch, close/action signals, fade in/out, DND/lock/fullscreen suppression, history, sound; CLI/TOML-configurable, `cargo deb`-packaged. Both bus-name takeovers are validated and cleanly reversible (GTK with no shell restart needed to restore). Deferred (see [`docs/known-loss.md`](docs/known-loss.md)): a11y/AT-SPI2, per-button rendering, perf optimizations.
 > See [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) for milestone status, [`docs/gnome48-audit.md`](docs/gnome48-audit.md) for the takeover audit, and [`RESEARCH-BRIEF.md`](RESEARCH-BRIEF.md) for the design synthesis.
 
 ## The idea
