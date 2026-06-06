@@ -47,22 +47,32 @@ function dbusCall(dest, path, iface, method, params) {
     });
 }
 
-async function getNameOwnerPid(name) {
-    const owner = (await dbusCall(DBUS, DBUS_PATH, DBUS,
-        'GetNameOwner', new GLib.Variant('(s)', [name]))).deepUnpack()[0];
-    const pid = (await dbusCall(DBUS, DBUS_PATH, DBUS,
-        'GetConnectionUnixProcessID', new GLib.Variant('(s)', [owner]))).deepUnpack()[0];
-    return pid;
+async function getNameOwner(name) {
+    try {
+        return (await dbusCall(DBUS, DBUS_PATH, DBUS,
+            'GetNameOwner', new GLib.Variant('(s)', [name]))).deepUnpack()[0];
+    } catch (_e) {
+        return null; // NameHasNoOwner
+    }
 }
 
-/** Best-effort liveness probe so a restart fast-paths when the daemon already owns names. */
-async function daemonIsReady() {
-    try {
-        const r = await dbusCall(CONTROL_NAME, CONTROL_PATH, CONTROL_NAME, 'IsReady', null);
-        return r.deepUnpack()[0] === true;
-    } catch (_e) {
-        return false;
-    }
+async function getNameOwnerPid(name) {
+    const owner = await getNameOwner(name);
+    if (!owner)
+        return 0;
+    return (await dbusCall(DBUS, DBUS_PATH, DBUS,
+        'GetConnectionUnixProcessID', new GLib.Variant('(s)', [owner]))).deepUnpack()[0];
+}
+
+/**
+ * Fast-path: the takeover is already done when our daemon owns the Fdo name —
+ * i.e. the Fdo name and our control name resolve to the same connection. (The
+ * daemon's IsReady only reports liveness, not ownership, so it can't be used here.)
+ */
+async function takeoverAlreadyDone() {
+    const fdoOwner = await getNameOwner(FDO_NAME);
+    const ctrlOwner = await getNameOwner(CONTROL_NAME);
+    return fdoOwner !== null && fdoOwner === ctrlOwner;
 }
 
 function reportEvent(kind, detail) {
@@ -136,8 +146,8 @@ async function takeoverGtk() {
  * @param {{allowGtkTakeover: boolean}} opts
  */
 export async function takeover(opts) {
-    if (await daemonIsReady()) {
-        reportEvent('FASTPATH', 'daemon already owns names');
+    if (await takeoverAlreadyDone()) {
+        reportEvent('FASTPATH', 'daemon already owns the Fdo name');
         return;
     }
     await takeoverFdo();
