@@ -28,6 +28,10 @@ const ADW_LIGHT_FG: Rgba = [0.180, 0.204, 0.212, 1.0]; // #2e3436
 pub struct Config {
     pub default_timeout_ms: u64,
     pub low_urgency_timeout_ms: u64,
+    /// Hard ceiling on display time (ms): if > 0, every popup is force-closed no
+    /// later than this from creation, overriding longer/never-expire timeouts.
+    /// 0 = no cap (respect each notification's own timeout).
+    pub max_timeout_ms: u64,
     pub max_stack: usize,
     pub gap_px: u16,
     pub width_px: u16,
@@ -57,6 +61,7 @@ impl Default for Config {
         Self {
             default_timeout_ms: 5000,
             low_urgency_timeout_ms: 3000,
+            max_timeout_ms: 0,
             max_stack: 5,
             gap_px: 10,
             width_px: 0,
@@ -109,6 +114,7 @@ impl Config {
         let mut c = Config::default();
         c.default_timeout_ms = ours.uint("default-timeout-ms") as u64;
         c.low_urgency_timeout_ms = ours.uint("low-urgency-timeout-ms") as u64;
+        c.max_timeout_ms = ours.uint("max-timeout-ms") as u64;
         c.max_stack = (ours.uint("max-stack") as usize).max(1);
         c.gap_px = ours.uint("gap-px") as u16;
         c.width_px = ours.uint("width-px") as u16;

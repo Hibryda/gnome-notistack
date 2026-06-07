@@ -146,6 +146,8 @@ export default class NotistackPreferences extends ExtensionPreferences {
             { lower: 0, upper: 120000, step: 500 });
         addSpin(timing, settings, 'low-urgency-timeout-ms', 'Low-urgency timeout (ms)',
             { lower: 0, upper: 120000, step: 500 });
+        addSpin(timing, settings, 'max-timeout-ms', 'Max display time (ms, 0 = per-notification)',
+            { lower: 0, upper: 120000, step: 500 });
         addSpin(timing, settings, 'fade-ms', 'Fade duration (ms, 0 = instant)',
             { lower: 0, upper: 2000, step: 10 });
 

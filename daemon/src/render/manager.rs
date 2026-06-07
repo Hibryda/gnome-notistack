@@ -138,6 +138,8 @@ impl Manager {
             let n = self.popups[i].notification.clone();
             let hover = self.popups[i].hover;
             let (pixels, stride, height, regions) = self.render_pixels(&n, hover)?;
+            // Re-evaluate expiry so a changed max-timeout-ms applies to live popups.
+            let expires_at = self.deadline(&n);
             let win = self.popups[i].window;
             let w = self.popup_width() as u32;
             self.ui.conn.configure_window(
@@ -150,6 +152,7 @@ impl Manager {
             p.stride = stride;
             p.height = height;
             p.regions = regions;
+            p.expires_at = expires_at;
         }
         self.reflow()
     }
@@ -226,15 +229,23 @@ impl Manager {
     }
 
     fn deadline(&self, n: &Notification) -> Option<Instant> {
-        if !n.auto_expires() {
-            return None;
+        // The notification's own expiry (None = never, e.g. critical/sticky).
+        let natural = n.auto_expires().then(|| {
+            let dur = match n.expire_timeout_ms {
+                Some(v) if v > 0 => Duration::from_millis(v as u64),
+                _ if n.urgency == Urgency::Low => self.config.low_urgency_timeout(),
+                _ => self.config.default_timeout(),
+            };
+            n.created + dur
+        });
+        // Hard ceiling (config): caps everything, including never-expire ones.
+        let cap = (self.config.max_timeout_ms > 0)
+            .then(|| n.created + Duration::from_millis(self.config.max_timeout_ms));
+        match (natural, cap) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (None, Some(b)) => Some(b),
+            (other, None) => other,
         }
-        let dur = match n.expire_timeout_ms {
-            Some(v) if v > 0 => Duration::from_millis(v as u64),
-            _ if n.urgency == Urgency::Low => self.config.low_urgency_timeout(),
-            _ => self.config.default_timeout(),
-        };
-        Some(n.created + dur)
     }
 
     /// Render a card; returns `(pixels, stride, height, regions)` with
