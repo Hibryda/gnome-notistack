@@ -31,10 +31,12 @@ pub mod reason {
 }
 
 /// Effective display duration from a notification's `natural` expiry (None =
-/// never-expire), applying the config floor (`min_ms`) then ceiling (`max_ms`):
-///   - `min_ms` raises a finite expiry so it shows at least that long; a
-///     never-expire popup already satisfies any floor, so it is left untouched.
-///   - `max_ms` caps everything, including never-expire popups.
+/// never-expire), applying the config floor (`min_ms`) then ceiling (`max_ms`).
+///
+/// - `min_ms` raises a finite expiry so it shows at least that long; a
+///   never-expire popup already satisfies any floor, so it is left untouched.
+/// - `max_ms` caps everything, including never-expire popups.
+///
 /// Both `0` = respect `natural`. When `min_ms >= max_ms > 0`, the ceiling is
 /// applied last and wins, so the result is the constant `max_ms`.
 fn effective_timeout(natural: Option<Duration>, min_ms: u64, max_ms: u64) -> Option<Duration> {
