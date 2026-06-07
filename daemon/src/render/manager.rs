@@ -640,7 +640,23 @@ pub fn run(
     feedback: UnboundedSender<Feedback>,
     config: Config,
 ) -> Result<()> {
-    let ui = Ui::connect()?;
+    // X11 may not be ready at session start (a race with the session importing
+    // DISPLAY into the environment), so retry briefly instead of dying — a dead
+    // render thread would silently drop every notification.
+    let ui = {
+        let mut attempt = 0;
+        loop {
+            match Ui::connect() {
+                Ok(ui) => break ui,
+                Err(e) if attempt < 20 => {
+                    attempt += 1;
+                    warn!(attempt, error = %e, "X11 not ready; retrying in 500ms");
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    };
     let monitors: Vec<String> = ui.list_monitors().into_iter().map(|m| m.0).collect();
     info!(?monitors, "detected monitors");
     let mon = ui.monitor_geometry(&config.monitor)?;
