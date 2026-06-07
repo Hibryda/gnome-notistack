@@ -46,9 +46,10 @@ Configurable:
 - **Layout** — target monitor (`primary` or a connector like `DP-1`), width as a
   fraction of monitor *height* capped by a fraction of its *width* (or an absolute
   px), gap, margin, max stack. Popups start under the top bar (`_NET_WORKAREA`).
-- **Timing** — default / low-urgency timeouts, a hard max display time (`0` =
-  respect each notification's own timeout; otherwise force-close at that cap,
-  even for "never expire" ones), fade duration.
+- **Timing** — default / low-urgency timeouts, a min and max display time (`0` =
+  respect each notification's own timeout; min raises short timeouts, max
+  force-closes long/"never expire" ones; min ≥ max gives a constant display
+  time = max), fade duration.
 - **Behavior** — history size, suppress-on-fullscreen, native-GTK takeover.
 
 ## Notification content

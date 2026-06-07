@@ -30,6 +30,26 @@ pub mod reason {
     pub const CLOSED_BY_CALL: u32 = 3;
 }
 
+/// Effective display duration from a notification's `natural` expiry (None =
+/// never-expire), applying the config floor (`min_ms`) then ceiling (`max_ms`):
+///   - `min_ms` raises a finite expiry so it shows at least that long; a
+///     never-expire popup already satisfies any floor, so it is left untouched.
+///   - `max_ms` caps everything, including never-expire popups.
+/// Both `0` = respect `natural`. When `min_ms >= max_ms > 0`, the ceiling is
+/// applied last and wins, so the result is the constant `max_ms`.
+fn effective_timeout(natural: Option<Duration>, min_ms: u64, max_ms: u64) -> Option<Duration> {
+    let mut d = natural;
+    if min_ms > 0 {
+        let floor = Duration::from_millis(min_ms);
+        d = d.map(|x| x.max(floor));
+    }
+    if max_ms > 0 {
+        let ceil = Duration::from_millis(max_ms);
+        d = Some(d.map_or(ceil, |x| x.min(ceil)));
+    }
+    d
+}
+
 /// Fade animation state of a popup.
 #[derive(Clone, Copy)]
 enum Fade {
@@ -229,23 +249,18 @@ impl Manager {
     }
 
     fn deadline(&self, n: &Notification) -> Option<Instant> {
-        // The notification's own expiry (None = never, e.g. critical/sticky).
-        let natural = n.auto_expires().then(|| {
-            let dur = match n.expire_timeout_ms {
-                Some(v) if v > 0 => Duration::from_millis(v as u64),
-                _ if n.urgency == Urgency::Low => self.config.low_urgency_timeout(),
-                _ => self.config.default_timeout(),
-            };
-            n.created + dur
+        // The notification's own expiry duration (None = never, e.g. critical).
+        let natural = n.auto_expires().then(|| match n.expire_timeout_ms {
+            Some(v) if v > 0 => Duration::from_millis(v as u64),
+            _ if n.urgency == Urgency::Low => self.config.low_urgency_timeout(),
+            _ => self.config.default_timeout(),
         });
-        // Hard ceiling (config): caps everything, including never-expire ones.
-        let cap = (self.config.max_timeout_ms > 0)
-            .then(|| n.created + Duration::from_millis(self.config.max_timeout_ms));
-        match (natural, cap) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (None, Some(b)) => Some(b),
-            (other, None) => other,
-        }
+        effective_timeout(
+            natural,
+            self.config.min_timeout_ms,
+            self.config.max_timeout_ms,
+        )
+        .map(|d| n.created + d)
     }
 
     /// Render a card; returns `(pixels, stride, height, regions)` with
@@ -716,5 +731,49 @@ pub fn run(
         // Tick faster while animating (≈60fps), idle otherwise.
         let tick = if mgr.has_active_fades() { 16 } else { 50 };
         std::thread::sleep(Duration::from_millis(tick));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::effective_timeout;
+    use std::time::Duration;
+
+    fn ms(n: u64) -> Option<Duration> {
+        Some(Duration::from_millis(n))
+    }
+
+    #[test]
+    fn no_caps_respects_natural() {
+        assert_eq!(effective_timeout(ms(1000), 0, 0), ms(1000));
+        assert_eq!(effective_timeout(None, 0, 0), None); // never-expire stays
+    }
+
+    #[test]
+    fn floor_raises_finite_only() {
+        assert_eq!(effective_timeout(ms(1000), 4000, 0), ms(4000)); // raised
+        assert_eq!(effective_timeout(ms(9000), 4000, 0), ms(9000)); // already longer
+        assert_eq!(effective_timeout(None, 4000, 0), None); // never-expire untouched
+    }
+
+    #[test]
+    fn ceiling_caps_everything() {
+        assert_eq!(effective_timeout(ms(10000), 0, 2000), ms(2000));
+        assert_eq!(effective_timeout(None, 0, 2000), ms(2000)); // even never-expire
+    }
+
+    #[test]
+    fn floor_and_ceiling_clamp() {
+        assert_eq!(effective_timeout(ms(1000), 3000, 8000), ms(3000)); // up to floor
+        assert_eq!(effective_timeout(ms(10000), 3000, 8000), ms(8000)); // down to ceil
+        assert_eq!(effective_timeout(ms(5000), 3000, 8000), ms(5000)); // in range
+    }
+
+    #[test]
+    fn min_ge_max_is_constant_max() {
+        assert_eq!(effective_timeout(ms(1000), 5000, 2000), ms(2000));
+        assert_eq!(effective_timeout(ms(9000), 5000, 2000), ms(2000));
+        assert_eq!(effective_timeout(None, 5000, 2000), ms(2000));
+        assert_eq!(effective_timeout(ms(2000), 2000, 2000), ms(2000)); // min==max
     }
 }

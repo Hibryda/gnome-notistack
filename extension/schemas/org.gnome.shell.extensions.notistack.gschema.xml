@@ -12,6 +12,10 @@
       <default>3000</default>
       <summary>Low-urgency popup timeout (ms)</summary>
     </key>
+    <key name="min-timeout-ms" type="u">
+      <default>0</default>
+      <summary>Floor on display time (ms); 0 = respect each notification's own timeout</summary>
+    </key>
     <key name="max-timeout-ms" type="u">
       <default>0</default>
       <summary>Hard cap on display time (ms); 0 = respect each notification's own timeout</summary>
