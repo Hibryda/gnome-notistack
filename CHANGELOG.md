@@ -7,6 +7,9 @@ yet versioned, so everything lives under Unreleased.
 ## [Unreleased]
 
 ### Added
+- **Packaging & docs for public release** — MIT license, a public README with
+  screenshots, a wiki, and a GitHub Actions release workflow that publishes `.deb`
+  packages and portable tarballs (with a per-user installer) for X11/GNOME distros.
 - **Configurable placement** — six positions (top/bottom × left/center/right;
   default top-right). Bottom placements anchor to the bottom edge and **stack
   upward** (newest at the bottom); the "+N more" tile follows the growth direction.
