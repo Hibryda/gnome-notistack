@@ -7,6 +7,10 @@ yet versioned, so everything lives under Unreleased.
 ## [Unreleased]
 
 ### Added
+- **`monitor = focused`** — show popups on the monitor currently under the pointer
+  (a fresh batch follows focus; a live stack stays put).
+- **Auto re-takeover after a daemon restart** — the extension watches the daemon's
+  control name and re-runs the takeover when it reappears.
 - Notification **action buttons** rendered as a full-width bottom bar (FDO
   `actions` + GTK `buttons`), clickable with hit-testing → `ActionInvoked` /
   `ActivateAction`.
@@ -24,9 +28,13 @@ yet versioned, so everything lives under Unreleased.
 ### Changed
 - Configuration moved from TOML/CLI flags to **GSettings** (edited via the prefs
   window).
-- `image-data` is validated at construction (`RawImage::from_wire`).
+- `image-data` is validated at construction (`RawImage::from_wire`); colours are a
+  clamping `Rgba` newtype.
+- Icon + inline images are decoded once and cached per popup (hover re-renders no
+  longer re-decode).
 - Geometry math (`popup_width`/`anchor`) and the timeout floor/ceiling extracted
-  into tested pure functions; unit tests 6 → 30.
+  into tested pure functions; unit tests 6 → 36 (incl. zvariant hint parsers and
+  an adversarial markup torture test).
 
 ### Fixed
 - **Session start:** survive X11 not being ready (self-heal `DISPLAY`/
@@ -44,5 +52,7 @@ yet versioned, so everything lives under Unreleased.
 ### Security
 - Pango-markup injection via `<a>` link text (escape + card-height clamp).
 - `parse_color` panic on multibyte input (reachable from the prefs colour fields).
+- Render-thread crash on a NUL byte in a notification body/summary (interior NUL
+  panicked pango's C-string conversion) — NULs are now stripped before pango.
 - Mirror hardening (`useBodyMarkup: false`, themed-icon-only); `sound-file`
   restricted to existing files; notification summary no longer logged (PII).
