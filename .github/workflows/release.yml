@@ -1,0 +1,103 @@
+name: release
+
+# Build .deb packages and portable tarballs for X11/GNOME distros, attached to a
+# GitHub Release. Triggered by pushing a version tag (e.g. v0.1.0).
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Build on a couple of glibc baselines so the binaries run across common
+        # Debian/Ubuntu X11+GNOME releases (a binary built on an older glibc runs
+        # on newer ones, not vice-versa). 22.04 = the broad-compat baseline.
+        os: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libglib2.0-dev libcairo2-dev libpango1.0-dev libgdk-pixbuf-2.0-dev \
+            libxcb1-dev libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: Build (release)
+        run: cargo build --release --locked
+
+      - name: Run tests
+        run: cargo test --release --locked
+
+      - name: Build .deb
+        run: |
+          cargo install cargo-deb --locked
+          cargo deb -p gnome-notistack --no-build
+          mkdir -p dist
+          cp target/debian/*.deb "dist/"
+
+      - name: Build portable tarball
+        run: |
+          VERSION="$(grep -m1 '^version' daemon/Cargo.toml | sed -E 's/.*"(.*)".*/\1/')"
+          DISTRO="${{ matrix.os }}"
+          STAGE="gnome-notistack-${VERSION}-x86_64-${DISTRO}"
+          mkdir -p "dist/${STAGE}/extension"
+          cp target/release/gnome-notistack            "dist/${STAGE}/"
+          cp packaging/gnome-notistack.service         "dist/${STAGE}/"
+          cp -r extension/*.js extension/metadata.json extension/schemas "dist/${STAGE}/extension/"
+          cp README.md LICENSE                         "dist/${STAGE}/"
+          cp packaging/install-portable.sh             "dist/${STAGE}/install.sh"
+          chmod +x "dist/${STAGE}/install.sh"
+          tar -C dist -czf "dist/${STAGE}.tar.gz" "${STAGE}"
+          rm -rf "dist/${STAGE}"
+
+      - name: Rename .deb with distro suffix
+        run: |
+          for f in dist/*.deb; do
+            base="$(basename "$f" .deb)"
+            mv "$f" "dist/${base}_${{ matrix.os }}.deb"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.os }}
+          path: dist/*
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.deb
+            dist/*.tar.gz
+          generate_release_notes: true
