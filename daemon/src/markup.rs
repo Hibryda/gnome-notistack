@@ -251,6 +251,32 @@ mod tests {
     }
 
     #[test]
+    fn img_without_alt_is_dropped() {
+        assert_eq!(to_pango("a <img src=\"x.png\"/> b"), "a  b");
+    }
+
+    #[test]
+    fn convert_br_uppercase() {
+        assert_eq!(to_pango("a<BR>b"), "a\nb");
+    }
+
+    #[test]
+    fn extract_links_distinct_urls_for_repeated_text() {
+        assert_eq!(
+            extract_links("<a href=\"a\">go</a> and <a href=\"b\">go</a>"),
+            vec![("a".into(), "go".into()), ("b".into(), "go".into())]
+        );
+    }
+
+    #[test]
+    fn extract_images_single_quotes() {
+        assert_eq!(
+            extract_images("<img src='x.png'/>"),
+            vec!["x.png".to_string()]
+        );
+    }
+
+    #[test]
     fn extracts_links() {
         assert_eq!(
             extract_links("see <a href=\"https://x.test\">the site</a> now"),
