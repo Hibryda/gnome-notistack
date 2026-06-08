@@ -212,6 +212,74 @@ mod tests {
     }
 
     #[test]
+    fn markup_fns_never_panic_on_adversarial_input() {
+        // Fuzz-lite: the markup parsers are hand-rolled byte-slicing over untrusted
+        // input; a non-char-boundary slice or bad index would panic. Throw a corpus
+        // of pathological inputs + every 3-fragment combination and assert none of
+        // to_pango/extract_links/extract_images/escape panics.
+        let corpus = [
+            "",
+            "<",
+            ">",
+            "<a",
+            "<a href",
+            "<a href=\"x",
+            "<a href=\"x\">t</a>",
+            "</a>",
+            "<a href='x'>\u{20ac}</a>",
+            "a\u{20ac}b<a href=\"\u{20ac}\">\u{20ac}</a>",
+            "<br",
+            "<br>",
+            "<BR/>",
+            "a<br>b",
+            "<img",
+            "<img src=\"x\"/>",
+            "<img alt=\"\u{20ac}\"/>",
+            "<span size=\"999999\">x</span>",
+            "<a href=\"x\"></span><span>y</a>",
+            "&amp;&lt;&gt;&#39;&quot;",
+            "<b><i><u>x",
+            "\0",
+            "a\0b",
+            "<a href=\"\0\">\0</a>",
+            "\u{1d518}\u{1d52b}",
+            "\u{1f389}<a href=\"\u{1f389}\">\u{1f389}</a>",
+            "<<<<>>>>",
+        ];
+        for s in corpus {
+            let _ = to_pango(s);
+            let _ = extract_links(s);
+            let _ = extract_images(s);
+            let _ = escape(s);
+        }
+        let frags = [
+            "<a href=\"\u{20ac}\">",
+            "</a>",
+            "<br>",
+            "<img src='\u{20ac}'/>",
+            "\u{20ac}",
+            "<span>",
+            "</span>",
+            "\"",
+            "'",
+            "<",
+            ">",
+            "&",
+            "\0",
+        ];
+        for a in frags {
+            for b in frags {
+                for c in frags {
+                    let s = format!("{a}{b}{c}x{c}{b}{a}");
+                    let _ = to_pango(&s);
+                    let _ = extract_links(&s);
+                    let _ = extract_images(&s);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn passes_valid_markup() {
         assert_eq!(to_pango("<b>bold</b> <i>it</i>"), "<b>bold</b> <i>it</i>");
         assert_eq!(to_pango("a &amp; b"), "a &amp; b");
