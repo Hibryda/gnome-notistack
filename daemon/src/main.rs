@@ -27,6 +27,9 @@ fn main() -> anyhow::Result<()> {
     init_tracing();
 
     let cli = cli::Cli::parse();
+    // Recover DISPLAY/XAUTHORITY from the systemd user env if we were autostarted
+    // before the session imported them (done here while still single-threaded).
+    render::manager::ensure_display_env();
     // Config comes from GSettings (live-reloaded by the render thread).
     let config = config::Config::load();
 

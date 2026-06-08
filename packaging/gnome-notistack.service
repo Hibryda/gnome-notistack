@@ -19,12 +19,10 @@ After=graphical-session.target
 Type=simple
 # Find our GSettings schema (shipped with the extension).
 Environment=GSETTINGS_SCHEMA_DIR=/usr/share/gnome-shell/extensions/notistack@hemoglobina.store/schemas
-# Wait until the session has imported DISPLAY into the user manager environment,
-# so ExecStart inherits it and the render thread can reach X11. Without this the
-# daemon can start before DISPLAY exists, the render thread fails to connect, and
-# every notification is silently dropped. (ExecStart inherits the manager env as
-# of fork time, so the wait must finish first.) Proceeds anyway after ~9s.
-ExecStartPre=/bin/sh -c 'for i in $(seq 30); do systemctl --user show-environment | grep -q "^DISPLAY=" && exit 0; sleep 0.3; done; exit 0'
+# DISPLAY/XAUTHORITY may not be in the env yet at session start; the daemon
+# self-heals them from `systemctl --user show-environment` and retries the X11
+# connection (see render::manager::ensure_display_env), so we start immediately
+# (a delayed start would push past the extension's takeover window).
 ExecStart=/usr/lib/gnome-notistack/gnome-notistack
 Restart=on-failure
 RestartSec=2

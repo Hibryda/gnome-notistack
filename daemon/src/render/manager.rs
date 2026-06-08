@@ -662,23 +662,58 @@ impl Manager {
     }
 }
 
+/// Populate `DISPLAY`/`XAUTHORITY` from the systemd user environment if they are
+/// missing from our process env. At session start the daemon (autostarted via the
+/// user unit) can be spawned before the session imports these into the unit env,
+/// so `XCBConnection::connect` would fail with no way to recover. We self-heal by
+/// querying `systemctl --user show-environment`, which gains them once the session
+/// imports them — no dependence on unit ordering. (libxcb reads both from the env;
+/// XAUTHORITY is required because gdm's auth file isn't `~/.Xauthority`.)
+pub fn ensure_display_env() {
+    use std::env;
+    if env::var_os("DISPLAY").is_some() && env::var_os("XAUTHORITY").is_some() {
+        return;
+    }
+    let Ok(out) = std::process::Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .output()
+    else {
+        return;
+    };
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        if let Some(v) = line.strip_prefix("DISPLAY=") {
+            if env::var_os("DISPLAY").is_none() {
+                env::set_var("DISPLAY", v);
+            }
+        } else if let Some(v) = line.strip_prefix("XAUTHORITY=") {
+            if env::var_os("XAUTHORITY").is_none() {
+                env::set_var("XAUTHORITY", v);
+            }
+        }
+    }
+}
+
 /// Render-thread entry point. Owns the X11 connection for its whole lifetime.
 pub fn run(
     mut rx: UnboundedReceiver<Command>,
     feedback: UnboundedSender<Feedback>,
     config: Config,
 ) -> Result<()> {
-    // X11 may not be ready at session start (a race with the session importing
-    // DISPLAY into the environment), so retry briefly instead of dying — a dead
-    // render thread would silently drop every notification.
+    // X11 may not be ready at session start (the session imports DISPLAY into the
+    // environment after our unit starts). Self-heal DISPLAY/XAUTHORITY from
+    // systemctl and retry for up to ~60s instead of dying — a dead render thread
+    // would silently drop every notification.
     let ui = {
         let mut attempt = 0;
         loop {
+            ensure_display_env();
             match Ui::connect() {
                 Ok(ui) => break ui,
-                Err(e) if attempt < 20 => {
+                Err(e) if attempt < 120 => {
                     attempt += 1;
-                    warn!(attempt, error = %e, "X11 not ready; retrying in 500ms");
+                    if attempt % 6 == 0 {
+                        warn!(attempt, error = %e, "X11 not ready; retrying (self-healing DISPLAY)");
+                    }
                     std::thread::sleep(Duration::from_millis(500));
                 }
                 Err(e) => return Err(e),
