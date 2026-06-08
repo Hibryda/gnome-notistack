@@ -399,8 +399,8 @@ impl Manager {
             title_body_gap: self.config.title_body_gap_px as i32,
             max_height: self.mon.3 as i32,
             hover,
-            bg: self.config.bg,
-            fg: self.config.fg,
+            bg: self.config.bg.0,
+            fg: self.config.fg.0,
         })?;
         Ok((pixels, stride, height as u16, regions))
     }

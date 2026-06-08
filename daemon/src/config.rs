@@ -15,14 +15,23 @@ use tracing::warn;
 pub const SCHEMA_ID: &str = "org.gnome.shell.extensions.notistack";
 const IFACE_SCHEMA: &str = "org.gnome.desktop.interface";
 
-/// RGBA in 0.0–1.0.
-pub type Rgba = [f64; 4];
+/// RGBA in 0.0–1.0, clamped at construction so a color is always in range
+/// (the channels feed cairo/Pango directly). `.0` is the raw array.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rgba(pub [f64; 4]);
+
+impl Rgba {
+    /// Clamp each channel into 0.0–1.0.
+    pub fn new(rgba: [f64; 4]) -> Self {
+        Self(rgba.map(|c| c.clamp(0.0, 1.0)))
+    }
+}
 
 // Adwaita window background / foreground (light + dark), alpha for translucency.
-const ADW_DARK_BG: Rgba = [0.141, 0.141, 0.141, 0.96]; // #242424
-const ADW_DARK_FG: Rgba = [1.0, 1.0, 1.0, 1.0];
-const ADW_LIGHT_BG: Rgba = [0.980, 0.980, 0.984, 0.97]; // #fafafb
-const ADW_LIGHT_FG: Rgba = [0.180, 0.204, 0.212, 1.0]; // #2e3436
+const ADW_DARK_BG: Rgba = Rgba([0.141, 0.141, 0.141, 0.96]); // #242424
+const ADW_DARK_FG: Rgba = Rgba([1.0, 1.0, 1.0, 1.0]);
+const ADW_LIGHT_BG: Rgba = Rgba([0.980, 0.980, 0.984, 0.97]); // #fafafb
+const ADW_LIGHT_FG: Rgba = Rgba([0.180, 0.204, 0.212, 1.0]); // #2e3436
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
@@ -229,8 +238,8 @@ fn parse_color(s: &str) -> Option<Rgba> {
             .map(|v| v as f64 / 255.0)
     };
     match h.len() {
-        6 => Some([byte(0)?, byte(2)?, byte(4)?, 1.0]),
-        8 => Some([byte(0)?, byte(2)?, byte(4)?, byte(6)?]),
+        6 => Some(Rgba::new([byte(0)?, byte(2)?, byte(4)?, 1.0])),
+        8 => Some(Rgba::new([byte(0)?, byte(2)?, byte(4)?, byte(6)?])),
         _ => None,
     }
 }
@@ -251,8 +260,8 @@ mod tests {
 
     #[test]
     fn parses_colors() {
-        assert_eq!(parse_color("#ff0000"), Some([1.0, 0.0, 0.0, 1.0]));
-        assert_eq!(parse_color("#00000080").unwrap()[3], 128.0 / 255.0);
+        assert_eq!(parse_color("#ff0000"), Some(Rgba([1.0, 0.0, 0.0, 1.0])));
+        assert_eq!(parse_color("#00000080").unwrap().0[3], 128.0 / 255.0);
         assert_eq!(parse_color(""), None);
         assert_eq!(parse_color("nope"), None);
     }

@@ -92,8 +92,8 @@ pub fn demo(config: &crate::config::Config) -> Result<()> {
         title_body_gap: config.title_body_gap_px as i32,
         max_height: mh as i32,
         hover: None,
-        bg: config.bg,
-        fg: config.fg,
+        bg: config.bg.0,
+        fg: config.fg.0,
     })?;
     let h = h as u16;
     let x = mx + mw as i16 - w as i16 - margin;
