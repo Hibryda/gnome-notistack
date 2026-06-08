@@ -95,14 +95,15 @@ fn parse_image_data(hints: &HashMap<String, OwnedValue>) -> Option<RawImage> {
         }
         _ => return None,
     };
-    Some(RawImage {
-        width: i32::try_from(&f[0]).ok()?,
-        height: i32::try_from(&f[1]).ok()?,
-        rowstride: i32::try_from(&f[2]).ok()?,
-        has_alpha: bool::try_from(&f[3]).ok()?,
-        channels: i32::try_from(&f[5]).ok()?,
+    // (iiibiiay): width, height, rowstride, has_alpha, bits, channels, data.
+    // RawImage::from_wire validates dims/stride/channels against the buffer.
+    RawImage::from_wire(
+        i32::try_from(&f[0]).ok()?,
+        i32::try_from(&f[1]).ok()?,
+        i32::try_from(&f[2]).ok()?,
+        i32::try_from(&f[5]).ok()?,
         bytes,
-    })
+    )
 }
 
 #[interface(name = "org.freedesktop.Notifications")]
@@ -210,4 +211,27 @@ pub async fn emit_closed(emitter: &SignalEmitter<'_>, id: u32, reason: u32) -> z
 
 pub async fn emit_action(emitter: &SignalEmitter<'_>, id: u32, key: String) -> zbus::Result<()> {
     FdoNotifications::action_invoked(emitter, id, key).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_actions;
+
+    #[test]
+    fn parse_actions_pairs_and_orphan() {
+        let a = parse_actions(vec![
+            "default".into(),
+            "Open".into(),
+            "reply".into(),
+            "Reply".into(),
+        ]);
+        assert_eq!(a.len(), 2);
+        assert_eq!(a[0].key, "default");
+        assert_eq!(a[0].label, "Open");
+        assert_eq!(a[1].key, "reply");
+        // Odd-length array: trailing unpaired element is dropped, no panic.
+        let b = parse_actions(vec!["k".into(), "L".into(), "orphan".into()]);
+        assert_eq!(b.len(), 1);
+        assert!(parse_actions(vec![]).is_empty());
+    }
 }

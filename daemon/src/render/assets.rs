@@ -14,8 +14,6 @@ use tracing::debug;
 
 use crate::notification::RawImage;
 
-const MAX_RAW_DIM: i32 = 4096;
-
 /// Resolve and decode an icon to premultiplied BGRA at `size`×`size`. `theme` is
 /// the active icon theme (themed lookups inherit down to hicolor).
 pub fn load_icon(
@@ -97,24 +95,14 @@ fn render_svg(path: &Path, size: u32) -> Option<(Vec<u8>, i32)> {
     Some((data, size as i32))
 }
 
-/// Convert an inline `image-data` buffer to premultiplied BGRA at `size`×`size`.
+/// Convert a (pre-validated) inline `image-data` buffer to premultiplied BGRA at
+/// `size`×`size`. All bounds were checked in `RawImage::from_wire`, so the
+/// indexing here is guaranteed in range.
 fn raw_to_bgra(raw: &RawImage, size: u32) -> Option<(Vec<u8>, i32)> {
-    let (w, h) = (raw.width, raw.height);
-    if w <= 0 || h <= 0 || w > MAX_RAW_DIM || h > MAX_RAW_DIM || raw.channels < 3 {
-        return None;
-    }
-    let (w, h, ch, stride) = (
-        w as usize,
-        h as usize,
-        raw.channels as usize,
-        raw.rowstride as usize,
-    );
-    if stride < w * ch || raw.bytes.len() < stride * h {
-        return None; // malformed / truncated (rule 02: reject, don't guess)
-    }
+    let (w, h, ch) = (raw.width(), raw.height(), raw.channels());
     let mut rgba = Vec::with_capacity(w * h * 4);
     for y in 0..h {
-        let row = &raw.bytes[y * stride..];
+        let row = raw.row(y);
         for x in 0..w {
             let i = x * ch;
             rgba.push(row[i]);
