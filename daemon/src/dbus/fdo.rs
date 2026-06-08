@@ -164,7 +164,11 @@ impl FdoNotifications {
             actions,
             default_action,
             urgency: parse_urgency(&hints),
-            sound_file: string_hint(&hints, "sound-file"),
+            // Only honor a sound-file that is an existing regular file — the hint
+            // is attacker-controlled and is handed to a player subprocess (rule 01:
+            // reject, don't guess; blocks file:// URLs and arbitrary-path probing).
+            sound_file: string_hint(&hints, "sound-file")
+                .filter(|p| std::path::Path::new(p).is_file()),
             sound_name: string_hint(&hints, "sound-name"),
             suppress_sound: hints
                 .get("suppress-sound")
@@ -175,7 +179,8 @@ impl FdoNotifications {
             created: Instant::now(),
         };
 
-        info!(id, app = %notification.app_name, summary = %notification.summary, "FDO Notify");
+        // Don't log the summary at info — it routinely contains PII (rule 13).
+        info!(id, app = %notification.app_name, "FDO Notify");
         if self.tx.send(Command::Show(Box::new(notification))).is_err() {
             tracing::warn!("render thread gone; dropping notification");
         }

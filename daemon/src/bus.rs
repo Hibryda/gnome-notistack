@@ -30,7 +30,7 @@ pub async fn serve(
         .context("connecting to session bus")?
         .serve_at(dbus::FDO_PATH, FdoNotifications::new(tx.clone()))
         .context("exporting FDO interface")?
-        .serve_at(CONTROL_PATH, Control::default())
+        .serve_at(CONTROL_PATH, Control::new(config.gtk_takeover))
         .context("exporting control interface")?
         .build()
         .await

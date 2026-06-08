@@ -94,7 +94,10 @@ async fn activate_gtk_action(conn: &zbus::Connection, app_id: &str, action: &str
     use std::collections::HashMap;
     use zbus::zvariant::Value;
 
-    let object_path = format!("/{}", app_id.replace('.', "/"));
+    // Match GApplication's app-id → object-path mangling: '.'→'/' and '-'→'_'
+    // (a naive '.'→'/' alone yields an INVALID path for hyphenated app ids like
+    // "com.my-app.X", so the default action would be silently lost).
+    let object_path = format!("/{}", app_id.replace('.', "/").replace('-', "_"));
     let action_name = action.strip_prefix("app.").unwrap_or(action);
     let body = (
         action_name,

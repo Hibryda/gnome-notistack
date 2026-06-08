@@ -385,6 +385,9 @@ impl Manager {
             self.enqueue(n);
             return Ok(());
         }
+        // Record only when actually displaying — recording before the suppression
+        // check meant queued-then-dropped notifications entered history unseen.
+        self.history.record(&n);
         let expires_at = self.deadline(&n);
         let default_action = n.default_action.clone();
         let (pixels, stride, height, regions) = self.render_pixels(&n, None)?;
@@ -781,7 +784,6 @@ pub fn run(
         loop {
             match rx.try_recv() {
                 Ok(Command::Show(n)) => {
-                    mgr.history.record(&n);
                     if let Err(e) = mgr.show(*n) {
                         warn!(error = %e, "failed to show popup");
                     }

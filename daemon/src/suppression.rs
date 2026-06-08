@@ -63,5 +63,14 @@ async fn screen_locked(conn: &zbus::Connection) -> Option<bool> {
     )
     .await
     .ok()?;
-    proxy.call("GetActive", &()).await.ok()
+    // Bound the call (rule 14): a hung screensaver service must not stall the
+    // suppression poll loop. On timeout, treat as "unknown" (not locked).
+    let call = proxy.call("GetActive", &());
+    match tokio::time::timeout(std::time::Duration::from_secs(2), call).await {
+        Ok(r) => r.ok(),
+        Err(_) => {
+            tracing::warn!("org.gnome.ScreenSaver GetActive timed out");
+            None
+        }
+    }
 }
