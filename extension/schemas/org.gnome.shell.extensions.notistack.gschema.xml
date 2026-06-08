@@ -109,5 +109,9 @@
       <default>true</default>
       <summary>Also take over org.gtk.Notifications (native-GTK apps)</summary>
     </key>
+    <key name="a11y-announce" type="b">
+      <default>false</default>
+      <summary>Announce notifications to screen readers (AT-SPI / Orca)</summary>
+    </key>
   </schema>
 </schemalist>

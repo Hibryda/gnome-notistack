@@ -45,6 +45,8 @@ pub enum Feedback {
     GtkActivate { app_id: String, action: String },
     /// Open a body hyperlink (clicked `<a href>`) in the default browser.
     OpenUrl(String),
+    /// Speak a notification via AT-SPI (screen-reader announcement).
+    Announce { text: String, assertive: bool },
     /// Mirror a shown notification into GNOME's notification list (date menu),
     /// via the control `Posted` signal the extension listens for.
     Mirror {

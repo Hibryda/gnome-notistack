@@ -164,5 +164,7 @@ export default class NotistackPreferences extends ExtensionPreferences {
             'Hide popups while a fullscreen window is focused');
         addSwitch(behavior, settings, 'gtk-takeover', 'Take over native-GTK notifications',
             'Covers org.gtk.Notifications. Takes effect on the next daemon start.');
+        addSwitch(behavior, settings, 'a11y-announce', 'Announce to screen readers',
+            'Speak notifications via AT-SPI (Orca). Requires accessibility enabled.');
     }
 }

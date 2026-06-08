@@ -65,6 +65,8 @@ pub struct Config {
     pub history_size: usize,
     pub suppress_on_fullscreen: bool,
     pub gtk_takeover: bool,
+    /// Emit AT-SPI screen-reader announcements when a popup is shown.
+    pub a11y_announce: bool,
     /// Resolved card background / foreground colors (from theme unless overridden).
     pub bg: Rgba,
     pub fg: Rgba,
@@ -93,6 +95,7 @@ impl Default for Config {
             history_size: 100,
             suppress_on_fullscreen: true,
             gtk_takeover: true,
+            a11y_announce: false,
             bg: ADW_DARK_BG,
             fg: ADW_DARK_FG,
         }
@@ -143,6 +146,7 @@ impl Config {
         c.history_size = ours.uint("history-size") as usize;
         c.suppress_on_fullscreen = ours.boolean("suppress-on-fullscreen");
         c.gtk_takeover = ours.boolean("gtk-takeover");
+        c.a11y_announce = ours.boolean("a11y-announce");
 
         // Active icon theme (for themed app-icon resolution).
         if let Some(theme) = iface.map(|i| i.string("icon-theme")) {

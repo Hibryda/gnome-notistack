@@ -20,7 +20,7 @@ mod sound;
 mod suppression;
 
 use anyhow::Context;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 fn main() -> anyhow::Result<()> {
     use clap::Parser;
@@ -163,6 +163,11 @@ fn spawn_signal_emitter(
                 return;
             }
         };
+        // AT-SPI announcer, created lazily on the first announcement (so the a11y
+        // bus is only touched when a11y-announce is on). One attempt; on failure
+        // we stop trying for this process.
+        let mut announcer: Option<a11y::Announcer> = None;
+        let mut a11y_tried = false;
         while let Some(fb) = fb_rx.recv().await {
             match fb {
                 render::Feedback::Closed { id, reason } => {
@@ -212,6 +217,22 @@ fn spawn_signal_emitter(
                         .await
                     {
                         error!(error = %e, "failed to emit Posted mirror signal");
+                    }
+                }
+                render::Feedback::Announce { text, assertive } => {
+                    if announcer.is_none() && !a11y_tried {
+                        a11y_tried = true;
+                        match a11y::Announcer::register().await {
+                            Ok(a) => announcer = Some(a),
+                            Err(e) => {
+                                warn!(error = %e, "AT-SPI unavailable; no screen-reader announcements")
+                            }
+                        }
+                    }
+                    if let Some(a) = &announcer {
+                        if let Err(e) = a.announce(&text, assertive).await {
+                            warn!(error = %e, "AT-SPI announce failed");
+                        }
                     }
                 }
             }

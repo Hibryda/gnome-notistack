@@ -553,6 +553,19 @@ impl Manager {
             summary: n.summary.clone(),
             body: n.body.clone(),
         });
+        // Screen-reader announcement (AT-SPI), if enabled. Strip NUL — it would
+        // break the D-Bus string. (Markup is rarely present and Orca tolerates it.)
+        if self.config.a11y_announce {
+            let raw = if n.body.trim().is_empty() {
+                n.summary.clone()
+            } else {
+                format!("{}. {}", n.summary, n.body)
+            };
+            self.emit(Feedback::Announce {
+                text: raw.replace('\0', ""),
+                assertive: n.urgency == Urgency::Critical,
+            });
+        }
         self.popups.insert(
             0,
             Popup {
