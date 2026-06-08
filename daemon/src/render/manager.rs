@@ -690,16 +690,15 @@ impl Manager {
         Ok(())
     }
 
-    /// Dismiss all hidden notifications (clicking the "+N more" tile).
-    fn clear_overflow(&mut self) -> Result<()> {
-        let ids: Vec<NotificationId> = self.overflow.drain(..).map(|n| n.id).collect();
-        for id in ids {
-            if let NotificationId::Fdo(fid) = id {
-                self.emit(Feedback::Closed {
-                    id: fid,
-                    reason: reason::DISMISSED,
-                });
-            }
+    /// Reveal all hidden notifications (clicking the "+N more" tile): promote the
+    /// whole overflow pile into the visible stack, newest-hidden just under the
+    /// stack down to oldest at the bottom. The tile then disappears (pile empty);
+    /// the expanded popups still expire on their own timers and can be dismissed.
+    fn expand_overflow(&mut self) -> Result<()> {
+        let hidden: Vec<Notification> = self.overflow.drain(..).collect();
+        for n in hidden {
+            let at = self.popups.len();
+            self.place_popup(n, at)?;
         }
         self.refresh_overflow_tile()?;
         self.reflow()
@@ -944,9 +943,9 @@ impl Manager {
             }
             // Left-click only; hit-test buttons/links, else the default action.
             Event::ButtonPress(e) if e.detail == 1 => {
-                // Clicking the "+N more" tile dismisses all hidden notifications.
+                // Clicking the "+N more" tile reveals all hidden notifications.
                 if self.overflow_tile.map(|(w, _)| w) == Some(e.event) {
-                    self.clear_overflow()?;
+                    self.expand_overflow()?;
                 } else {
                     self.click(e.event, e.event_x as i32, e.event_y as i32)?;
                 }
