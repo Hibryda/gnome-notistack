@@ -379,9 +379,18 @@ pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32, Vec<Region>)> {
             }
             cr.restore().ok();
         }
+        // Individual draw ops above use `.ok()` as best-effort, but a cairo
+        // context is sticky: once it enters an error status every later op
+        // silently no-ops, yielding a blank/partial card. Surface the poisoned
+        // state instead of returning a silently-broken buffer (rule 02).
+        cr.status()
+            .context("cairo context error during card draw")?;
     }
 
     surface.flush();
+    surface
+        .status()
+        .context("cairo surface error after card draw")?;
     let stride = surface.stride();
     let data = surface.data().context("borrow cairo surface data")?;
     Ok((data.to_vec(), stride, height, regions))

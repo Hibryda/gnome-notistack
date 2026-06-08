@@ -51,6 +51,19 @@ impl History {
         self.save();
     }
 
+    /// Update the retention cap (on a live `history-size` config change), trimming
+    /// immediately if it shrank.
+    pub fn set_cap(&mut self, cap: usize) {
+        if cap == self.cap {
+            return;
+        }
+        self.cap = cap;
+        while self.entries.len() > self.cap {
+            self.entries.pop_front();
+        }
+        self.save();
+    }
+
     fn save(&self) {
         let Some(path) = &self.path else { return };
         if let Some(parent) = path.parent() {

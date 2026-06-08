@@ -149,18 +149,42 @@ impl Manager {
             return Ok(());
         }
         info!("config changed — applying live");
+        let fade_disabled = self.config.fade_ms > 0 && new.fade_ms == 0;
+        if self.config.gtk_takeover != new.gtk_takeover {
+            warn!("gtk-takeover change requires a daemon restart to take effect");
+        }
         self.config = new;
+        self.history.set_cap(self.config.history_size);
         // The target monitor may have changed.
         self.mon = self
             .ui
             .monitor_geometry(&self.config.monitor)
             .unwrap_or(self.mon);
-        // Re-render every popup with the new font/colors/width.
+        // Fade just turned off: snap fading-in popups visible, and finish any
+        // in-progress fade-out now (advance_fades no-ops when fade_ms == 0, so
+        // they'd otherwise be stranded invisible / never closed).
+        if fade_disabled {
+            let mut to_close = Vec::new();
+            for p in &mut self.popups {
+                match p.fade {
+                    Fade::Out(_, reason) => to_close.push((p.id.clone(), reason)),
+                    _ => {
+                        p.fade = Fade::Visible;
+                        let _ = self.ui.set_opacity(p.window, 1.0);
+                    }
+                }
+            }
+            for (id, reason) in to_close {
+                self.finish_close(&id, reason)?;
+            }
+        }
+        // Re-render every surviving popup with the new font/colors/width. Reset
+        // hover: the pointer's relationship to the new region set is unknown, so a
+        // carried index would dangle (CRITICAL — illegal index into p.regions).
         for i in 0..self.popups.len() {
             let n = self.popups[i].notification.clone();
-            let hover = self.popups[i].hover;
-            let (pixels, stride, height, regions) = self.render_pixels(&n, hover)?;
-            // Re-evaluate expiry so a changed max-timeout-ms applies to live popups.
+            let (pixels, stride, height, regions) = self.render_pixels(&n, None)?;
+            // Re-evaluate expiry so a changed min/max-timeout applies to live popups.
             let expires_at = self.deadline(&n);
             let win = self.popups[i].window;
             let w = self.popup_width() as u32;
@@ -175,6 +199,19 @@ impl Manager {
             p.height = height;
             p.regions = regions;
             p.expires_at = expires_at;
+            p.hover = None;
+        }
+        // Evict excess if max-stack shrank (oldest = last, newest-first ordering).
+        while self.popups.len() > self.config.max_stack {
+            if let Some(old) = self.popups.pop() {
+                let _ = self.ui.conn.destroy_window(old.window);
+                if let NotificationId::Fdo(id) = old.id {
+                    self.emit(Feedback::Closed {
+                        id,
+                        reason: reason::CLOSED_BY_CALL,
+                    });
+                }
+            }
         }
         self.reflow()
     }
@@ -502,26 +539,36 @@ impl Manager {
         let now = Instant::now();
         let mut done_out: Vec<(NotificationId, u32)> = Vec::new();
 
+        // A per-popup opacity failure (e.g. a BadWindow from a racing close) is
+        // cosmetic — log and continue rather than `?`-propagating, which would
+        // bubble out of run() to process::exit(1) and restart the daemon over a
+        // fade glitch (rule 14: non-critical deps degrade, don't take down).
         for p in &mut self.popups {
-            match p.fade {
+            let opacity = match p.fade {
                 Fade::In(start) => {
                     let t = (now - start).as_secs_f64() / dur;
                     if t >= 1.0 {
                         p.fade = Fade::Visible;
-                        self.ui.set_opacity(p.window, 1.0)?;
+                        Some(1.0)
                     } else {
-                        self.ui.set_opacity(p.window, t)?;
+                        Some(t)
                     }
                 }
                 Fade::Out(start, reason) => {
                     let t = (now - start).as_secs_f64() / dur;
                     if t >= 1.0 {
                         done_out.push((p.id.clone(), reason));
+                        None
                     } else {
-                        self.ui.set_opacity(p.window, 1.0 - t)?;
+                        Some(1.0 - t)
                     }
                 }
-                Fade::Visible => {}
+                Fade::Visible => None,
+            };
+            if let Some(o) = opacity {
+                if let Err(e) = self.ui.set_opacity(p.window, o) {
+                    warn!(window = p.window, error = %e, "set_opacity failed (fade); continuing");
+                }
             }
         }
         for (id, reason) in done_out {
@@ -572,7 +619,10 @@ impl Manager {
         let new_hover = self.popups[i].regions.iter().position(|r| r.contains(x, y));
         if new_hover != self.popups[i].hover {
             self.popups[i].hover = new_hover;
-            self.ui.set_pointer(window, new_hover.is_some())?;
+            // Cursor is cosmetic — don't let a failure abort the render thread.
+            if let Err(e) = self.ui.set_pointer(window, new_hover.is_some()) {
+                warn!(window, error = %e, "set_pointer failed (hover); continuing");
+            }
             self.rerender(i)?;
         }
         Ok(())
