@@ -255,7 +255,12 @@ impl Ui {
     pub fn pointer_monitor(&self) -> Option<(i16, i16, u16, u16)> {
         let p = self.conn.query_pointer(self.root).ok()?.reply().ok()?;
         let (px, py) = (p.root_x as i32, p.root_y as i32);
-        let reply = self.conn.randr_get_monitors(self.root, true).ok()?.reply().ok()?;
+        let reply = self
+            .conn
+            .randr_get_monitors(self.root, true)
+            .ok()?
+            .reply()
+            .ok()?;
         reply
             .monitors
             .iter()
