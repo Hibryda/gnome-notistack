@@ -5,6 +5,12 @@ All notable changes to gnome-notistack are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-08
+
+### Changed
+- Point the project URLs (`Cargo.toml` repository, the extension `url`, and the
+  systemd unit `Documentation`) at the public GitHub repository.
+
 ## [0.1.0] - 2026-06-08
 
 First public release.

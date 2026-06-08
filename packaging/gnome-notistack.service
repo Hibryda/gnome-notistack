@@ -11,7 +11,7 @@
 # no /bin/false override is used, so there is nothing to clean up on stop.
 [Unit]
 Description=gnome-notistack notification daemon
-Documentation=https://git.hemoglobina.store/hibryda/gnome-notistack
+Documentation=https://github.com/Hibryda/gnome-notistack
 PartOf=graphical-session.target
 After=graphical-session.target
 

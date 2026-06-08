@@ -1,11 +1,11 @@
 [package]
 name = "gnome-notistack"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.91"
 description = "Standalone FreeDesktop notification daemon for GNOME Shell 48 / X11 — a vertical stack of override-redirect popups (dunst-style, on GNOME)"
 license = "MIT"
-repository = "https://git.hemoglobina.store/hibryda/gnome-notistack"
+repository = "https://github.com/Hibryda/gnome-notistack"
 default-run = "gnome-notistack"
 
 [[bin]]
