@@ -22,4 +22,4 @@ notifications the shell would otherwise show.
 
 > **Requirements:** GNOME Shell 48, X11 (no Wayland), the mutter compositor.
 
-See the [README](https://github.com/) for screenshots and the feature list.
+See the project's **README** for screenshots and the full feature list.
