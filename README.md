@@ -43,9 +43,11 @@ Configurable:
 - **Appearance** — color theme (auto/light/dark, Adwaita palette), background/text
   color overrides, font family + title/body sizes (`0`/empty = from the system),
   title↔body gap.
-- **Layout** — target monitor (`primary` or a connector like `DP-1`), width as a
-  fraction of monitor *height* capped by a fraction of its *width* (or an absolute
-  px), gap, margin, max stack. Popups start under the top bar (`_NET_WORKAREA`).
+- **Layout** — placement (the 4 corners + top/bottom center; bottom positions
+  stack upward), target monitor (`primary`, `focused`, or a connector like
+  `DP-1`), width as a fraction of monitor *height* capped by a fraction of its
+  *width* (or an absolute px), gap, margin, max stack. Popups clear panels
+  (`_NET_WORKAREA`).
 - **Timing** — default / low-urgency timeouts, a min and max display time (`0` =
   respect each notification's own timeout; min raises short timeouts, max
   force-closes long/"never expire" ones; min ≥ max gives a constant display

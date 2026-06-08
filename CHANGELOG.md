@@ -7,6 +7,11 @@ yet versioned, so everything lives under Unreleased.
 ## [Unreleased]
 
 ### Added
+- **Configurable placement** — six positions (top/bottom × left/center/right;
+  default top-right). Bottom placements anchor to the bottom edge and **stack
+  upward** (newest at the bottom); the "+N more" tile follows the growth direction.
+- **Freshest-notification accent** — a discrete Adwaita-blue stripe down the left
+  edge of the newest popup, moving with the stack.
 - **Screen-reader announcements (AT-SPI2 / Orca)** — a minimal accessible
   application registers on the a11y bus and emits `object:announcement` when a
   popup is shown, restoring the accessibility that override-redirect popups
