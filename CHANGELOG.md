@@ -7,6 +7,10 @@ yet versioned, so everything lives under Unreleased.
 ## [Unreleased]
 
 ### Added
+- **"+N more" overflow tile** — notifications beyond `max-stack` are held (not
+  dropped) and shown as a clickable tile below the stack; the newest hidden one is
+  promoted when a slot frees, hidden ones still expire, and clicking the tile
+  dismisses them all.
 - **`monitor = focused`** — show popups on the monitor currently under the pointer
   (a fresh batch follows focus; a live stack stays put).
 - **Auto re-takeover after a daemon restart** — the extension watches the daemon's
