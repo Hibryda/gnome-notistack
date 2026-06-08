@@ -152,6 +152,12 @@ struct Manager {
     was_suppressed: bool,
     /// Notifications received while suppressed, replayed on unsuppress (no loss).
     queued: Vec<Notification>,
+    /// Notifications that don't fit the visible stack (newest-first). Shown as a
+    /// "+N more" tile and promoted back to visible when a slot frees; they still
+    /// expire on their own timers while hidden.
+    overflow: Vec<Notification>,
+    /// The "+N more" tile window + its height, when overflow is non-empty.
+    overflow_tile: Option<(Window, u16)>,
     /// Persisted metadata-only history.
     history: History,
     /// Last fullscreen poll (throttle the X11 round-trips).
@@ -180,6 +186,8 @@ impl Manager {
             fullscreen: false,
             was_suppressed: false,
             queued: Vec::new(),
+            overflow: Vec::new(),
+            overflow_tile: None,
             history,
             last_fs_check: Instant::now(),
             settings: crate::config::open(),
@@ -253,18 +261,17 @@ impl Manager {
             p.expires_at = expires_at;
             p.hover = None;
         }
-        // Evict excess if max-stack shrank (oldest = last, newest-first ordering).
-        while self.popups.len() > self.config.max_stack {
+        // max-stack shrank → move the excess (oldest) into overflow; grew →
+        // promote hidden ones to fill the new slots. Either way refresh the tile.
+        let cap = self.config.max_stack.max(1);
+        while self.popups.len() > cap {
             if let Some(old) = self.popups.pop() {
                 let _ = self.ui.conn.destroy_window(old.window);
-                if let NotificationId::Fdo(id) = old.id {
-                    self.emit(Feedback::Closed {
-                        id,
-                        reason: reason::CLOSED_BY_CALL,
-                    });
-                }
+                self.overflow.insert(0, old.notification);
             }
         }
+        self.promote_overflow()?;
+        self.refresh_overflow_tile()?;
         self.reflow()
     }
 
@@ -498,16 +505,20 @@ impl Manager {
             return Ok(());
         }
 
-        // Drop the oldest when at capacity (M3-remaining: an "N more" overflow card).
-        while self.popups.len() >= self.config.max_stack {
-            if let Some(old) = self.popups.pop() {
-                self.ui.conn.destroy_window(old.window)?;
-                if let NotificationId::Fdo(id) = old.id {
-                    self.emit(Feedback::Closed {
-                        id,
-                        reason: reason::EXPIRED,
-                    });
+        // At capacity: move the oldest *visible* popup to overflow (kept, not
+        // closed — it shows in the "+N more" tile and can be promoted back). A
+        // popup already fading out was being dismissed, so close it for real.
+        let cap = self.config.max_stack.max(1);
+        while self.popups.len() >= cap {
+            let old = self.popups.pop().expect("len >= cap >= 1");
+            let _ = self.ui.conn.destroy_window(old.window);
+            match old.fade {
+                Fade::Out(_, r) => {
+                    if let NotificationId::Fdo(id) = old.id {
+                        self.emit(Feedback::Closed { id, reason: r });
+                    }
                 }
+                _ => self.overflow.insert(0, old.notification),
             }
         }
 
@@ -559,6 +570,125 @@ impl Manager {
                 hover: None,
             },
         );
+        self.refresh_overflow_tile()?;
+        self.reflow()
+    }
+
+    /// Render+map a held notification at `index` in the visible stack (used to
+    /// promote from overflow; history/sound/mirror already happened on first show).
+    fn place_popup(&mut self, n: Notification, index: usize) -> Result<()> {
+        let expires_at = self.deadline(&n);
+        let default_action = n.default_action.clone();
+        let assets = self.decode_assets(&n);
+        let (pixels, stride, height, regions) = self.render_pixels(&n, &assets, None)?;
+        let (x, top) = self.anchor();
+        let window = self
+            .ui
+            .create_popup(x as i16, top as i16, self.popup_width(), height)?;
+        let fade = if self.config.fade_ms > 0 {
+            self.ui.set_opacity(window, 0.0)?;
+            Fade::In(Instant::now())
+        } else {
+            Fade::Visible
+        };
+        self.ui.map(window)?;
+        self.ui.put_argb(window, height, stride, &pixels)?;
+        self.popups.insert(
+            index,
+            Popup {
+                id: n.id.clone(),
+                window,
+                height,
+                stride,
+                pixels,
+                expires_at,
+                default_action,
+                fade,
+                notification: n,
+                assets,
+                regions,
+                hover: None,
+            },
+        );
+        Ok(())
+    }
+
+    /// Fill freed visible slots from overflow (newest-hidden first), at the bottom.
+    fn promote_overflow(&mut self) -> Result<()> {
+        let cap = self.config.max_stack.max(1);
+        while self.popups.len() < cap && !self.overflow.is_empty() {
+            let n = self.overflow.remove(0);
+            let at = self.popups.len();
+            self.place_popup(n, at)?;
+        }
+        Ok(())
+    }
+
+    /// Render the "+N more" tile card → (pixels, stride, height).
+    fn render_overflow_card(&self, n: usize) -> Result<(Vec<u8>, i32, u16)> {
+        let label = format!("+{n} more notification{}", if n == 1 { "" } else { "s" });
+        let (pixels, stride, height, _regions) = cairo::render_card(&Card {
+            summary: &label,
+            body: "",
+            width: self.popup_width() as i32,
+            icon: None,
+            inline_images: &[],
+            buttons: &[],
+            links: &[],
+            font: &self.config.font_family,
+            summary_pt: self.config.body_size_pt,
+            body_pt: self.config.body_size_pt,
+            title_body_gap: 0,
+            max_height: self.mon.3 as i32,
+            hover: None,
+            bg: self.config.bg.0,
+            fg: self.config.fg.0,
+        })?;
+        Ok((pixels, stride, height as u16))
+    }
+
+    /// Create / update / destroy the "+N more" tile to match the overflow count.
+    fn refresh_overflow_tile(&mut self) -> Result<()> {
+        let n = self.overflow.len();
+        if n == 0 {
+            if let Some((win, _)) = self.overflow_tile.take() {
+                let _ = self.ui.conn.destroy_window(win);
+            }
+            return Ok(());
+        }
+        let (pixels, stride, height) = self.render_overflow_card(n)?;
+        let w = self.popup_width();
+        if let Some((win, _)) = self.overflow_tile {
+            self.ui.conn.configure_window(
+                win,
+                &ConfigureWindowAux::new()
+                    .width(w as u32)
+                    .height(height as u32),
+            )?;
+            self.ui.put_argb(win, height, stride, &pixels)?;
+            self.overflow_tile = Some((win, height));
+        } else {
+            let (x, top) = self.anchor();
+            let win = self.ui.create_popup(x as i16, top as i16, w, height)?;
+            self.ui.map(win)?;
+            self.ui.put_argb(win, height, stride, &pixels)?;
+            self.overflow_tile = Some((win, height));
+        }
+        Ok(())
+    }
+
+    /// Dismiss all hidden notifications (clicking the "+N more" tile).
+    fn clear_overflow(&mut self) -> Result<()> {
+        let ids: Vec<NotificationId> = self.overflow.drain(..).map(|n| n.id).collect();
+        for id in ids {
+            if let NotificationId::Fdo(fid) = id {
+                self.emit(Feedback::Closed {
+                    id: fid,
+                    reason: reason::DISMISSED,
+                });
+            }
+        }
+        self.refresh_overflow_tile()?;
         self.reflow()
     }
 
@@ -574,6 +704,12 @@ impl Manager {
                 .conn
                 .configure_window(p.window, &ConfigureWindowAux::new().x(x).y(y))?;
             y += p.height as i32 + gap;
+        }
+        // The "+N more" tile sits below the stack.
+        if let Some((win, _)) = self.overflow_tile {
+            self.ui
+                .conn
+                .configure_window(win, &ConfigureWindowAux::new().x(x).y(y))?;
         }
         self.ui.conn.flush()?;
         Ok(())
@@ -602,6 +738,8 @@ impl Manager {
                 self.emit(Feedback::Closed { id: fid, reason });
             }
             info!(?id, reason, "popup closed");
+            self.promote_overflow()?; // fill the freed slot from the "+N more" pile
+            self.refresh_overflow_tile()?;
             self.reflow()?;
         }
         Ok(())
@@ -760,6 +898,27 @@ impl Manager {
         for id in expired {
             self.close(&id, reason::EXPIRED)?;
         }
+        // Hidden (overflow) notifications still expire on their own timers.
+        let due: Vec<usize> = self
+            .overflow
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| self.deadline(n).map(|t| t <= now).unwrap_or(false))
+            .map(|(i, _)| i)
+            .collect();
+        if !due.is_empty() {
+            for i in due.into_iter().rev() {
+                let n = self.overflow.remove(i);
+                if let NotificationId::Fdo(id) = n.id {
+                    self.emit(Feedback::Closed {
+                        id,
+                        reason: reason::EXPIRED,
+                    });
+                }
+            }
+            self.refresh_overflow_tile()?;
+            self.reflow()?;
+        }
         Ok(())
     }
 
@@ -772,7 +931,12 @@ impl Manager {
             }
             // Left-click only; hit-test buttons/links, else the default action.
             Event::ButtonPress(e) if e.detail == 1 => {
-                self.click(e.event, e.event_x as i32, e.event_y as i32)?
+                // Clicking the "+N more" tile dismisses all hidden notifications.
+                if self.overflow_tile.map(|(w, _)| w) == Some(e.event) {
+                    self.clear_overflow()?;
+                } else {
+                    self.click(e.event, e.event_x as i32, e.event_y as i32)?;
+                }
             }
             Event::MotionNotify(e) => {
                 self.hover_motion(e.event, e.event_x as i32, e.event_y as i32)?
@@ -789,6 +953,12 @@ impl Manager {
             // but log rather than swallow silently (rule 02).
             if let Err(e) = self.ui.conn.destroy_window(p.window) {
                 warn!(window = p.window, error = %e, "destroy_window during clear failed");
+            }
+        }
+        self.overflow.clear();
+        if let Some((win, _)) = self.overflow_tile.take() {
+            if let Err(e) = self.ui.conn.destroy_window(win) {
+                warn!(window = win, error = %e, "destroy_window (overflow tile) failed");
             }
         }
         self.ui.conn.flush()?;
