@@ -103,6 +103,17 @@ enum Fade {
 }
 
 /// One on-screen popup and its cached pixels (for Expose redraws).
+/// Decoded image assets for a popup, cached so a hover re-render (frequent) does
+/// not re-decode the icon/inline images each time. Re-decoded only on show and on
+/// a live config change (where the icon theme may have changed).
+#[derive(Default)]
+struct DecodedAssets {
+    /// Premultiplied BGRA icon + its size in px.
+    icon: Option<(Vec<u8>, i32)>,
+    /// Premultiplied BGRA inline `<img>` images + `(w, h)` px.
+    inline_images: Vec<(Vec<u8>, i32, i32)>,
+}
+
 struct Popup {
     id: NotificationId,
     window: Window,
@@ -116,6 +127,8 @@ struct Popup {
     /// The source notification, kept so the card can be re-rendered on a live
     /// config change (font/colors/width).
     notification: Notification,
+    /// Decoded icon + inline images, cached across hover re-renders.
+    assets: DecodedAssets,
     /// Clickable regions (buttons + links) in window-local pixels.
     regions: Vec<Region>,
     /// Region index currently under the pointer (for the hover highlight).
@@ -222,7 +235,9 @@ impl Manager {
         // carried index would dangle (CRITICAL — illegal index into p.regions).
         for i in 0..self.popups.len() {
             let n = self.popups[i].notification.clone();
-            let (pixels, stride, height, regions) = self.render_pixels(&n, None)?;
+            // Re-decode: the icon theme (and so the resolved icon) may have changed.
+            let assets = self.decode_assets(&n);
+            let (pixels, stride, height, regions) = self.render_pixels(&n, &assets, None)?;
             // Re-evaluate expiry so a changed min/max-timeout applies to live popups.
             let expires_at = self.deadline(&n);
             let win = self.popups[i].window;
@@ -237,6 +252,7 @@ impl Manager {
             p.stride = stride;
             p.height = height;
             p.regions = regions;
+            p.assets = assets;
             p.expires_at = expires_at;
             p.hover = None;
         }
@@ -332,14 +348,9 @@ impl Manager {
         .map(|d| n.created + d)
     }
 
-    /// Render a card; returns `(pixels, stride, height, regions)` with
-    /// content-derived height and clickable button/link regions. `hover` is the
-    /// region index under the pointer (highlighted), if any.
-    fn render_pixels(
-        &self,
-        n: &Notification,
-        hover: Option<usize>,
-    ) -> Result<(Vec<u8>, i32, u16, Vec<Region>)> {
+    /// Decode a notification's icon + inline images (the expensive, content-only
+    /// step). Cached per popup so hover re-renders don't repeat it.
+    fn decode_assets(&self, n: &Notification) -> DecodedAssets {
         let icon = super::assets::load_icon(
             &n.app_icon,
             n.image_path.as_deref(),
@@ -347,11 +358,25 @@ impl Manager {
             48,
             &self.config.icon_theme,
         );
-        // Inline <img> body images (local paths), scaled to fit the column.
-        let inline_images: Vec<(Vec<u8>, i32, i32)> = crate::markup::extract_images(&n.body)
+        let inline_images = crate::markup::extract_images(&n.body)
             .iter()
             .filter_map(|src| super::assets::load_image(src, 360, 240))
             .collect();
+        DecodedAssets {
+            icon,
+            inline_images,
+        }
+    }
+
+    /// Render a card from already-decoded `assets`; returns `(pixels, stride,
+    /// height, regions)` with content-derived height and clickable button/link
+    /// regions. `hover` is the region index under the pointer (highlighted), if any.
+    fn render_pixels(
+        &self,
+        n: &Notification,
+        assets: &DecodedAssets,
+        hover: Option<usize>,
+    ) -> Result<(Vec<u8>, i32, u16, Vec<Region>)> {
         let links = crate::markup::extract_links(&n.body);
         // Action buttons: every action except the whole-card "default".
         let buttons: Vec<(String, String)> = n
@@ -364,8 +389,8 @@ impl Manager {
             summary: &n.summary,
             body: &n.body,
             width: self.popup_width() as i32,
-            icon,
-            inline_images: &inline_images,
+            icon: assets.icon.clone(),
+            inline_images: &assets.inline_images,
             buttons: &buttons,
             links: &links,
             font: &self.config.font_family,
@@ -422,7 +447,8 @@ impl Manager {
         self.history.record(&n);
         let expires_at = self.deadline(&n);
         let default_action = n.default_action.clone();
-        let (pixels, stride, height, regions) = self.render_pixels(&n, None)?;
+        let assets = self.decode_assets(&n);
+        let (pixels, stride, height, regions) = self.render_pixels(&n, &assets, None)?;
 
         // replaces_id / dedup: update in place if the id is already displayed
         // (and not already fading out).
@@ -439,6 +465,7 @@ impl Manager {
                 p.expires_at = expires_at;
                 p.default_action = default_action;
                 p.regions = regions;
+                p.assets = assets;
                 p.hover = None;
                 resize = p.height != height;
                 p.height = height;
@@ -512,6 +539,7 @@ impl Manager {
                 default_action,
                 fade,
                 notification: n,
+                assets,
                 regions,
                 hover: None,
             },
@@ -630,10 +658,11 @@ impl Manager {
     }
 
     /// Re-render popup `i` in place (e.g. a hover change) — pixels only, no resize.
+    /// Reuses the popup's cached decoded assets (no icon/image re-decode).
     fn rerender(&mut self, i: usize) -> Result<()> {
-        let n = self.popups[i].notification.clone();
         let hover = self.popups[i].hover;
-        let (pixels, stride, height, _regions) = self.render_pixels(&n, hover)?;
+        let (pixels, stride, height, _regions) =
+            self.render_pixels(&self.popups[i].notification, &self.popups[i].assets, hover)?;
         self.popups[i].pixels = pixels;
         self.popups[i].stride = stride;
         self.ui.put_argb(
