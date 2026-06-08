@@ -107,3 +107,50 @@ impl GtkNotifications {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zbus::zvariant::Value;
+
+    #[test]
+    fn parse_buttons_absent_or_wrong_type_is_empty() {
+        let mut h: HashMap<String, OwnedValue> = HashMap::new();
+        assert!(parse_buttons(&h).is_empty()); // absent
+        h.insert(
+            "buttons".into(),
+            OwnedValue::try_from(Value::U8(1)).unwrap(),
+        );
+        assert!(parse_buttons(&h).is_empty()); // wrong type
+    }
+
+    #[test]
+    fn parse_buttons_reads_pairs_and_drops_incomplete() {
+        let mk = |action: &str, label: &str| -> HashMap<String, Value<'static>> {
+            HashMap::from([
+                ("action".to_string(), Value::from(action.to_string())),
+                ("label".to_string(), Value::from(label.to_string())),
+            ])
+        };
+        let arr = vec![mk("app.reply", "Reply"), mk("app.archive", "Archive")];
+        let mut h: HashMap<String, OwnedValue> = HashMap::new();
+        h.insert(
+            "buttons".into(),
+            OwnedValue::try_from(Value::from(arr)).unwrap(),
+        );
+        let b = parse_buttons(&h);
+        assert_eq!(b.len(), 2);
+        assert_eq!(b[0].key, "app.reply");
+        assert_eq!(b[0].label, "Reply");
+        // A button missing 'label' is dropped (filter_map), not panicked.
+        let incomplete: Vec<HashMap<String, Value<'static>>> = vec![HashMap::from([(
+            "action".to_string(),
+            Value::from("x".to_string()),
+        )])];
+        h.insert(
+            "buttons".into(),
+            OwnedValue::try_from(Value::from(incomplete)).unwrap(),
+        );
+        assert!(parse_buttons(&h).is_empty());
+    }
+}

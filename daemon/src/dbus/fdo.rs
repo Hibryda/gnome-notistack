@@ -232,7 +232,41 @@ pub async fn emit_action(emitter: &SignalEmitter<'_>, id: u32, key: String) -> z
 
 #[cfg(test)]
 mod tests {
-    use super::parse_actions;
+    use super::*;
+
+    fn owned(v: Value<'static>) -> OwnedValue {
+        OwnedValue::try_from(v).unwrap()
+    }
+
+    #[test]
+    fn parse_urgency_maps_bytes_and_defaults() {
+        let mut h: HashMap<String, OwnedValue> = HashMap::new();
+        assert_eq!(parse_urgency(&h), Urgency::Normal); // absent → Normal
+        h.insert("urgency".into(), owned(Value::U8(0)));
+        assert_eq!(parse_urgency(&h), Urgency::Low);
+        h.insert("urgency".into(), owned(Value::U8(2)));
+        assert_eq!(parse_urgency(&h), Urgency::Critical);
+        h.insert("urgency".into(), owned(Value::U8(1)));
+        assert_eq!(parse_urgency(&h), Urgency::Normal);
+        // Out-of-range must NOT become Critical (would suppress auto-expiry).
+        h.insert("urgency".into(), owned(Value::U8(7)));
+        assert_eq!(parse_urgency(&h), Urgency::Normal);
+    }
+
+    #[test]
+    fn parse_image_data_decodes_and_rejects() {
+        let mut h: HashMap<String, OwnedValue> = HashMap::new();
+        assert!(parse_image_data(&h).is_none()); // absent
+                                                 // (width, height, rowstride, has_alpha, bits, channels, data) = (iiibiiay)
+        let good = Value::from((1i32, 1i32, 4i32, true, 8i32, 4i32, vec![1u8, 2, 3, 4]));
+        h.insert("image-data".into(), owned(good));
+        let img = parse_image_data(&h).expect("valid 1x1 RGBA");
+        assert_eq!((img.width(), img.height(), img.channels()), (1, 1, 4));
+        // Hostile rowstride must be rejected (not panic).
+        let bad = Value::from((1i32, 1i32, -1i32, true, 8i32, 4i32, vec![1u8, 2, 3, 4]));
+        h.insert("image-data".into(), owned(bad));
+        assert!(parse_image_data(&h).is_none());
+    }
 
     #[test]
     fn parse_actions_pairs_and_orphan() {
