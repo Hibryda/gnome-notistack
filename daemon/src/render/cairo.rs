@@ -65,6 +65,8 @@ pub struct Card<'a> {
     /// Background / foreground colors (RGBA 0–1), from the theme or overrides.
     pub bg: [f64; 4],
     pub fg: [f64; 4],
+    /// Draw the "freshest notification" accent stripe down the left edge.
+    pub accent: bool,
 }
 
 /// Pango `size` attribute is in 1024ths of a point.
@@ -204,6 +206,13 @@ pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32, Vec<Region>)> {
         cr.set_source_rgba(card.fg[0], card.fg[1], card.fg[2], 0.10);
         cr.set_line_width(1.0);
         cr.stroke().ok();
+
+        // Freshest-notification hint: a discrete accent stripe down the left edge.
+        if card.accent {
+            rounded_rect(&cr, 5.0, 9.0, 4.0, (h - 18.0).max(2.0), 2.0);
+            cr.set_source_rgba(0.208, 0.518, 0.894, 0.95); // Adwaita blue #3584e4
+            cr.fill().ok();
+        }
 
         // Icon (top-aligned with the title).
         if let Some((data, isize)) = &card.icon {

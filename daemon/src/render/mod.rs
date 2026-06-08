@@ -96,6 +96,7 @@ pub fn demo(config: &crate::config::Config) -> Result<()> {
         hover: None,
         bg: config.bg.0,
         fg: config.fg.0,
+        accent: false,
     })?;
     let h = h as u16;
     let x = mx + mw as i16 - w as i16 - margin;

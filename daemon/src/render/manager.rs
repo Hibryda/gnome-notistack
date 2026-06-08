@@ -150,6 +150,8 @@ struct Popup {
     regions: Vec<Region>,
     /// Region index currently under the pointer (for the hover highlight).
     hover: Option<usize>,
+    /// Whether this popup currently shows the "freshest" accent (index 0 only).
+    fresh: bool,
 }
 
 struct Manager {
@@ -259,7 +261,8 @@ impl Manager {
             let n = self.popups[i].notification.clone();
             // Re-decode: the icon theme (and so the resolved icon) may have changed.
             let assets = self.decode_assets(&n);
-            let (pixels, stride, height, regions) = self.render_pixels(&n, &assets, None)?;
+            let fresh = i == 0;
+            let (pixels, stride, height, regions) = self.render_pixels(&n, &assets, None, fresh)?;
             // Re-evaluate expiry so a changed min/max-timeout applies to live popups.
             let expires_at = self.deadline(&n);
             let win = self.popups[i].window;
@@ -277,6 +280,7 @@ impl Manager {
             p.assets = assets;
             p.expires_at = expires_at;
             p.hover = None;
+            p.fresh = fresh;
         }
         // max-stack shrank → move the excess (oldest) into overflow; grew →
         // promote hidden ones to fill the new slots. Either way refresh the tile.
@@ -420,6 +424,7 @@ impl Manager {
         n: &Notification,
         assets: &DecodedAssets,
         hover: Option<usize>,
+        fresh: bool,
     ) -> Result<(Vec<u8>, i32, u16, Vec<Region>)> {
         let links = crate::markup::extract_links(&n.body);
         // Action buttons: every action except the whole-card "default".
@@ -445,6 +450,7 @@ impl Manager {
             hover,
             bg: self.config.bg.0,
             fg: self.config.fg.0,
+            accent: fresh,
         })?;
         Ok((pixels, stride, height as u16, regions))
     }
@@ -497,7 +503,9 @@ impl Manager {
         let expires_at = self.deadline(&n);
         let default_action = n.default_action.clone();
         let assets = self.decode_assets(&n);
-        let (pixels, stride, height, regions) = self.render_pixels(&n, &assets, None)?;
+        // Render fresh; reflow's update_fresh_marker reconciles if an in-place
+        // update lands on a non-top popup.
+        let (pixels, stride, height, regions) = self.render_pixels(&n, &assets, None, true)?;
 
         // replaces_id / dedup: update in place if the id is already displayed
         // (and not already fading out).
@@ -516,6 +524,7 @@ impl Manager {
                 p.regions = regions;
                 p.assets = assets;
                 p.hover = None;
+                p.fresh = true; // matches the fresh render; reflow reconciles
                 resize = p.height != height;
                 p.height = height;
             }
@@ -608,6 +617,7 @@ impl Manager {
                 assets,
                 regions,
                 hover: None,
+                fresh: true,
             },
         );
         self.refresh_overflow_tile()?;
@@ -620,7 +630,8 @@ impl Manager {
         let expires_at = self.deadline(&n);
         let default_action = n.default_action.clone();
         let assets = self.decode_assets(&n);
-        let (pixels, stride, height, regions) = self.render_pixels(&n, &assets, None)?;
+        // Promoted popups go below the stack → never the freshest; reflow reconciles.
+        let (pixels, stride, height, regions) = self.render_pixels(&n, &assets, None, false)?;
         let (x, top) = self.anchor();
         let window = self
             .ui
@@ -648,6 +659,7 @@ impl Manager {
                 assets,
                 regions,
                 hover: None,
+                fresh: false,
             },
         );
         Ok(())
@@ -683,6 +695,7 @@ impl Manager {
             hover: None,
             bg: self.config.bg.0,
             fg: self.config.fg.0,
+            accent: false,
         })?;
         Ok((pixels, stride, height as u16))
     }
@@ -736,7 +749,35 @@ impl Manager {
     /// configured placement. Top placements stack downward (newest on top, index
     /// 0 at the top edge); bottom placements stack upward (newest at the bottom).
     /// The "+N more" tile continues past the oldest popup in the growth direction.
+    /// Ensure exactly the newest popup (index 0) carries the "fresh" accent; the
+    /// accent is cosmetic (same layout), so only re-blit popups whose state flipped
+    /// — at most the new top and the previous top.
+    fn update_fresh_marker(&mut self) -> Result<()> {
+        for i in 0..self.popups.len() {
+            let desired = i == 0;
+            if self.popups[i].fresh == desired {
+                continue;
+            }
+            let (pixels, stride, _h, _regions) = self.render_pixels(
+                &self.popups[i].notification,
+                &self.popups[i].assets,
+                self.popups[i].hover,
+                desired,
+            )?;
+            self.ui.put_argb(
+                self.popups[i].window,
+                self.popups[i].height,
+                stride,
+                &pixels,
+            )?;
+            self.popups[i].pixels = pixels;
+            self.popups[i].fresh = desired;
+        }
+        Ok(())
+    }
+
     fn reflow(&mut self) -> Result<()> {
+        self.update_fresh_marker()?;
         let (ax, ay, aw, ah) = usable_rect(self.mon, self.ui.workarea());
         let margin = self.config.margin_px as i32;
         let gap = self.config.gap_px as i32;
@@ -881,8 +922,13 @@ impl Manager {
     /// Reuses the popup's cached decoded assets (no icon/image re-decode).
     fn rerender(&mut self, i: usize) -> Result<()> {
         let hover = self.popups[i].hover;
-        let (pixels, stride, height, _regions) =
-            self.render_pixels(&self.popups[i].notification, &self.popups[i].assets, hover)?;
+        let fresh = self.popups[i].fresh;
+        let (pixels, stride, height, _regions) = self.render_pixels(
+            &self.popups[i].notification,
+            &self.popups[i].assets,
+            hover,
+            fresh,
+        )?;
         self.popups[i].pixels = pixels;
         self.popups[i].stride = stride;
         self.ui.put_argb(
