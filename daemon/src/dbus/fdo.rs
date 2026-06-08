@@ -145,7 +145,13 @@ impl FdoNotifications {
         let id = if replaces_id != 0 {
             replaces_id
         } else {
-            self.next_id.fetch_add(1, Ordering::Relaxed)
+            // 0 is an invalid notification id (spec); skip it on u32 wraparound.
+            let next = self.next_id.fetch_add(1, Ordering::Relaxed);
+            if next == 0 {
+                self.next_id.fetch_add(1, Ordering::Relaxed)
+            } else {
+                next
+            }
         };
 
         let actions = parse_actions(actions);
@@ -190,7 +196,13 @@ impl FdoNotifications {
     /// Close a notification by id. M4 also emits `NotificationClosed(id, 3)`.
     fn close_notification(&self, id: u32) {
         info!(id, "FDO CloseNotification");
-        let _ = self.tx.send(Command::Close(NotificationId::Fdo(id)));
+        if self
+            .tx
+            .send(Command::Close(NotificationId::Fdo(id)))
+            .is_err()
+        {
+            tracing::warn!("render thread gone; dropping close");
+        }
     }
 
     #[zbus(signal)]

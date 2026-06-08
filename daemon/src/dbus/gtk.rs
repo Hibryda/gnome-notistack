@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::info;
+use tracing::{info, warn};
 use zbus::interface;
 use zbus::zvariant::OwnedValue;
 
@@ -90,14 +90,20 @@ impl GtkNotifications {
             created: Instant::now(),
         };
         info!(app_id, id, "GTK AddNotification");
-        let _ = self.tx.send(Command::Show(Box::new(n)));
+        if self.tx.send(Command::Show(Box::new(n))).is_err() {
+            warn!("render thread gone; dropping notification");
+        }
     }
 
     /// `RemoveNotification(app_id, id)`.
     fn remove_notification(&self, app_id: String, id: String) {
         info!(app_id, id, "GTK RemoveNotification");
-        let _ = self
+        if self
             .tx
-            .send(Command::Close(NotificationId::Gtk { app_id, id }));
+            .send(Command::Close(NotificationId::Gtk { app_id, id }))
+            .is_err()
+        {
+            warn!("render thread gone; dropping close");
+        }
     }
 }

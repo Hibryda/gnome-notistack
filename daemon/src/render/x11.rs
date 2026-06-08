@@ -242,6 +242,10 @@ impl Ui {
                     return Ok((m.x, m.y, m.width, m.height));
                 }
             }
+            tracing::warn!(
+                monitor = name,
+                "configured monitor not found; using primary"
+            );
         }
         self.primary_geometry()
     }

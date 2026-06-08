@@ -136,12 +136,15 @@ fn open_url(url: &str) {
         error!(url, "refusing to open non-web URL from a notification");
         return;
     }
-    let _ = std::process::Command::new("xdg-open")
+    if let Err(e) = std::process::Command::new("xdg-open")
         .arg(url)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .spawn();
+        .spawn()
+    {
+        error!(url, error = %e, "failed to launch xdg-open");
+    }
 }
 
 /// Drain the feedback channel and emit the matching FDO signals on the session bus.
@@ -177,12 +180,15 @@ fn spawn_signal_emitter(
                         sound::play_command(sound_backend, file.as_deref(), name.as_deref())
                     {
                         // Fire-and-forget; tokio reaps the dropped child.
-                        let _ = tokio::process::Command::new(prog)
+                        if let Err(e) = tokio::process::Command::new(prog)
                             .args(args)
                             .stdin(std::process::Stdio::null())
                             .stdout(std::process::Stdio::null())
                             .stderr(std::process::Stdio::null())
-                            .spawn();
+                            .spawn()
+                        {
+                            tracing::debug!(error = %e, "sound player spawn failed");
+                        }
                     }
                 }
                 render::Feedback::GtkActivate { app_id, action } => {

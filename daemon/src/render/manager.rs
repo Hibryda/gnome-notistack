@@ -382,7 +382,9 @@ impl Manager {
 
     /// Notify clients of a close/action, if this is an FDO notification.
     fn emit(&self, fb: Feedback) {
-        let _ = self.feedback.send(fb);
+        if self.feedback.send(fb).is_err() {
+            warn!("signal emitter task gone; dropping feedback");
+        }
     }
 
     /// Queue a notification received while suppressed (DND/lock). Bounded to
@@ -739,7 +741,11 @@ impl Manager {
 
     fn clear(&mut self) -> Result<()> {
         for p in self.popups.drain(..) {
-            let _ = self.ui.conn.destroy_window(p.window);
+            // Best-effort teardown (the X server reclaims on disconnect anyway),
+            // but log rather than swallow silently (rule 02).
+            if let Err(e) = self.ui.conn.destroy_window(p.window) {
+                warn!(window = p.window, error = %e, "destroy_window during clear failed");
+            }
         }
         self.ui.conn.flush()?;
         Ok(())
@@ -762,6 +768,7 @@ pub fn ensure_display_env() {
         .args(["--user", "show-environment"])
         .output()
     else {
+        tracing::debug!("systemctl show-environment unavailable; cannot self-heal DISPLAY");
         return;
     };
     for line in String::from_utf8_lossy(&out.stdout).lines() {
