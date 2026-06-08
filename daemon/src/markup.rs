@@ -53,8 +53,13 @@ fn convert_anchors(s: &str) -> String {
         let inner_rest = &after[gt + 1..];
         match inner_rest.find("</a>") {
             Some(close) => {
+                // SECURITY: escape the anchor inner text. Splicing it raw let a
+                // crafted body close our <span> and inject arbitrary Pango span
+                // attributes (size/color/font) past the parse_markup gate —
+                // spoofing + an unbounded-height surface (DoS). (Nested b/i/u
+                // inside a link consequently render literally; acceptably rare.)
                 out.push_str("<span underline=\"single\" foreground=\"#3584e4\">");
-                out.push_str(&inner_rest[..close]);
+                out.push_str(&escape(&inner_rest[..close]));
                 out.push_str("</span>");
                 rest = &inner_rest[close + 4..];
             }
@@ -232,6 +237,16 @@ mod tests {
         assert_eq!(
             to_pango("Visit <a href=\"https://x\">site</a>"),
             "Visit <span underline=\"single\" foreground=\"#3584e4\">site</span>"
+        );
+    }
+
+    #[test]
+    fn anchor_text_cannot_inject_span() {
+        // A crafted body must not be able to close our span and inject attributes.
+        let out = to_pango(r##"<a href="https://x"></span><span size="900000">HUGE</a>"##);
+        assert!(
+            !out.contains("size=\"900000\""),
+            "attacker span attribute leaked"
         );
     }
 

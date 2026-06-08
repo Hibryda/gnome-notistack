@@ -71,7 +71,7 @@ pub enum RenderMode {
 /// briefly, then exit. Invoked via `gnome-notistack --demo-popup`. No D-Bus.
 pub fn demo(config: &crate::config::Config) -> Result<()> {
     let ui = x11::Ui::connect()?;
-    let (mx, my, mw, _mh) = ui.primary_geometry()?;
+    let (mx, my, mw, mh) = ui.primary_geometry()?;
     let w: u16 = if config.width_px > 0 {
         config.width_px
     } else {
@@ -90,6 +90,7 @@ pub fn demo(config: &crate::config::Config) -> Result<()> {
         summary_pt: config.summary_size_pt,
         body_pt: config.body_size_pt,
         title_body_gap: config.title_body_gap_px as i32,
+        max_height: mh as i32,
         hover: None,
         bg: config.bg,
         fg: config.fg,

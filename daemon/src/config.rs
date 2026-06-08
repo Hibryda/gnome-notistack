@@ -218,6 +218,11 @@ fn parse_font(s: &str) -> (String, f64) {
 /// Parse `#rrggbb` or `#rrggbbaa` into RGBA (0–1). Returns None for empty/invalid.
 fn parse_color(s: &str) -> Option<Rgba> {
     let h = s.trim().strip_prefix('#')?;
+    // Guard byte-slicing below against multibyte chars: a value like "#a€00" is
+    // 6 bytes but slicing `h[0..2]` would split the `€` and panic. Hex is ASCII.
+    if !h.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
     let byte = |i: usize| {
         u8::from_str_radix(&h[i..i + 2], 16)
             .ok()
@@ -250,5 +255,13 @@ mod tests {
         assert_eq!(parse_color("#00000080").unwrap()[3], 128.0 / 255.0);
         assert_eq!(parse_color(""), None);
         assert_eq!(parse_color("nope"), None);
+    }
+
+    #[test]
+    fn parse_color_rejects_non_ascii_without_panicking() {
+        // Multibyte char in a 6-byte string must not panic on a non-boundary slice.
+        assert_eq!(parse_color("#a\u{20ac}00"), None); // "#a€00"
+        assert_eq!(parse_color("#zz0000"), None);
+        assert_eq!(parse_color("#12"), None);
     }
 }

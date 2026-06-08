@@ -305,6 +305,7 @@ impl Manager {
             summary_pt: self.config.summary_size_pt,
             body_pt: self.config.body_size_pt,
             title_body_gap: self.config.title_body_gap_px as i32,
+            max_height: self.mon.3 as i32,
             hover,
             bg: self.config.bg,
             fg: self.config.fg,

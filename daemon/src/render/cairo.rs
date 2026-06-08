@@ -55,6 +55,10 @@ pub struct Card<'a> {
     pub body_pt: f64,
     /// Gap between the title and the body, in px.
     pub title_body_gap: i32,
+    /// Hard cap on the card height (px) — bounds the ARGB surface so no markup
+    /// (e.g. a huge font-size) can force an unbounded allocation. Usually the
+    /// monitor height.
+    pub max_height: i32,
     /// Index (into the returned regions) currently under the pointer, if any —
     /// drawn with a hover highlight. Regions are ordered links-then-buttons.
     pub hover: Option<usize>,
@@ -176,7 +180,10 @@ pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32, Vec<Region>)> {
         content_h += gap + images_h;
     }
     let content_area = (content_h.max(icon_size) + 2 * PAD).max(MIN_HEIGHT);
-    let height = content_area + bar_h;
+    // Clamp to bound the surface allocation (DoS defense: untrusted markup can
+    // request enormous font sizes → enormous content height). Tall content is
+    // simply cropped.
+    let height = (content_area + bar_h).clamp(MIN_HEIGHT, card.max_height.max(MIN_HEIGHT));
 
     // --- Draw pass ---
     let mut surface = ::cairo::ImageSurface::create(::cairo::Format::ARgb32, card.width, height)
@@ -228,11 +235,20 @@ pub fn render_card(card: &Card) -> Result<(Vec<u8>, i32, i32, Vec<Region>)> {
             let bl = make_on(&cr, &body_markup, text_width);
             let text = bl.text();
             let mut link_rects: Vec<(i32, i32, i32, i32, String)> = Vec::new();
+            // Advance a cursor so repeated link texts map to successive occurrences
+            // (not all to the first match).
+            let mut search_from = 0usize;
             for (url, ltext) in card.links {
                 if ltext.is_empty() {
                     continue;
                 }
-                if let Some(byte) = text.as_str().find(ltext.as_str()) {
+                if let Some(rel) = text
+                    .as_str()
+                    .get(search_from..)
+                    .and_then(|t| t.find(ltext.as_str()))
+                {
+                    let byte = search_from + rel;
+                    search_from = byte + ltext.len();
                     let sp = bl.index_to_pos(byte as i32);
                     let ep = bl.index_to_pos((byte + ltext.len()) as i32);
                     let s = ::pango::SCALE;
