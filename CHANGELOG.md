@@ -7,6 +7,11 @@ yet versioned, so everything lives under Unreleased.
 ## [Unreleased]
 
 ### Added
+- **Screen-reader announcements (AT-SPI2 / Orca)** — a minimal accessible
+  application registers on the a11y bus and emits `object:announcement` when a
+  popup is shown, restoring the accessibility that override-redirect popups
+  otherwise lose. Off by default (`a11y-announce`); announcements only (a
+  navigable accessible tree is a later phase).
 - **"+N more" overflow tile** — notifications beyond `max-stack` are held (not
   dropped) and shown as a clickable tile below the stack; the newest hidden one is
   promoted when a slot frees, hidden ones still expire, and clicking the tile

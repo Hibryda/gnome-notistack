@@ -2,7 +2,7 @@
 
 A standalone notification daemon for **GNOME Shell 48 / X11** that shows **multiple stacked notifications at once** — replacing gnome-shell's one-banner-at-a-time display — without losing any notifications you'd otherwise see.
 
-> **Status:** feature-complete (M0–M9 core), validated live on GNOME 48.7/X11. Both `org.freedesktop.Notifications` (`notify-send`) and `org.gtk.Notifications` (native-GTK/Flatpak) traffic render as a live vertical stack of popups — icons (PNG/JPEG/SVG/inline data), Pango markup, dynamic height, urgency-aware expiry, replaces_id, click-to-dismiss + action dispatch, close/action signals, fade in/out, DND/lock/fullscreen suppression, history, sound; GSettings-configurable (theme-aware, live, GTK prefs window), `cargo deb`-packaged. Both bus-name takeovers are validated and cleanly reversible (GTK with no shell restart needed to restore). Action buttons (bottom bar), hyperlinks, inline images, hover highlights, min/max display caps, monitor selection, and a date-menu mirror are all in; installed + autostarting (systemd user unit). Deferred (see [`docs/known-loss.md`](docs/known-loss.md) / [`TODO.md`](TODO.md)): a11y/AT-SPI2, auto re-takeover after a daemon restart, X11 reconnect, perf optimizations.
+> **Status:** feature-complete (M0–M9 core), validated live on GNOME 48.7/X11. Both `org.freedesktop.Notifications` (`notify-send`) and `org.gtk.Notifications` (native-GTK/Flatpak) traffic render as a live vertical stack of popups — icons (PNG/JPEG/SVG/inline data), Pango markup, dynamic height, urgency-aware expiry, replaces_id, click-to-dismiss + action dispatch, close/action signals, fade in/out, DND/lock/fullscreen suppression, history, sound; GSettings-configurable (theme-aware, live, GTK prefs window), `cargo deb`-packaged. Both bus-name takeovers are validated and cleanly reversible (GTK with no shell restart needed to restore). Action buttons (bottom bar), hyperlinks, inline images, hover highlights, min/max display caps, monitor selection (incl. "focused"), a "+N more" overflow tile, a date-menu mirror, and **AT-SPI screen-reader announcements** are all in; installed + autostarting (systemd user unit). Deferred (see [`docs/known-loss.md`](docs/known-loss.md) / [`TODO.md`](TODO.md)): a navigable a11y tree, X11 mid-session reconnect, perf optimizations.
 > See [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) for milestone status, [`docs/gnome48-audit.md`](docs/gnome48-audit.md) for the takeover audit, and [`RESEARCH-BRIEF.md`](RESEARCH-BRIEF.md) for the design synthesis.
 
 ## The idea
@@ -50,7 +50,8 @@ Configurable:
   respect each notification's own timeout; min raises short timeouts, max
   force-closes long/"never expire" ones; min ≥ max gives a constant display
   time = max), fade duration.
-- **Behavior** — history size, suppress-on-fullscreen, native-GTK takeover.
+- **Behavior** — history size, suppress-on-fullscreen, native-GTK takeover, and
+  **screen-reader announcements** (AT-SPI/Orca; off by default).
 
 ## Notification content
 Popups render the full FDO/GTK notification: icon/image, Pango markup
