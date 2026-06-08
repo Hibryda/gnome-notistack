@@ -10,6 +10,7 @@ All notable changes to gnome-notistack are documented here. Format follows
 ### Changed
 - Point the project URLs (`Cargo.toml` repository, the extension `url`, and the
   systemd unit `Documentation`) at the public GitHub repository.
+- Correct the Debian package maintainer to `Hibryda <hibryda@protonmail.com>`.
 
 ## [0.1.0] - 2026-06-08
 

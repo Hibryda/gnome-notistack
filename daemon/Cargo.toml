@@ -37,7 +37,7 @@ zbus = { version = "5.16.0", default-features = false, features = ["tokio"] }
 # chosen over librsvg-rebind 0.3 which requires rustc >= 1.92 (target is 1.91).
 
 [package.metadata.deb]
-maintainer = "hibryda <guess.crypto@proton.me>"
+maintainer = "Hibryda <hibryda@protonmail.com>"
 section = "x11"
 priority = "optional"
 # $auto resolves the binary's shared-lib deps via dpkg-shlibdeps (cairo, pango,
