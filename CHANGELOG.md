@@ -1,10 +1,13 @@
 # Changelog
 
 All notable changes to gnome-notistack are documented here. Format follows
-[Keep a Changelog](https://keepachangelog.com/); this project is pre-1.0 and not
-yet versioned, so everything lives under Unreleased.
+[Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-06-08
+
+First public release.
 
 ### Added
 - **Packaging & docs for public release** — MIT license, a public README with
