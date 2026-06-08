@@ -9,11 +9,14 @@
 //! body is treated as plain text (escaped) so a malformed body can never break
 //! rendering (plan OBJ-40, rule 02).
 
-/// Escape text so it is safe as Pango markup (and XML).
+/// Escape text so it is safe as Pango markup (and XML). Interior NUL bytes are
+/// dropped: glib/pango treat strings as NUL-terminated, so a NUL would panic the
+/// `set_markup`/`parse_markup` call (reachable from an untrusted notification).
 pub fn escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
+            '\0' => {}
             '&' => out.push_str("&amp;"),
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
@@ -29,7 +32,11 @@ pub fn escape(s: &str) -> String {
 /// plain text if the (translated) body is not valid markup. `<br>` (not a Pango
 /// tag, but common) becomes a newline; `<img>` becomes its `alt`.
 pub fn to_pango(body: &str) -> String {
-    let brs = convert_br(body);
+    // Drop interior NULs up front: the valid-markup path feeds `translated` to
+    // pango::parse_markup, which panics on a NUL (C-string). Non-anchor body text
+    // isn't otherwise escaped, so strip here rather than rely on escape().
+    let body = body.replace('\0', "");
+    let brs = convert_br(&body);
     let translated = strip_img(&convert_anchors(&brs));
     match ::pango::parse_markup(&translated, '\u{0}') {
         Ok(_) => translated,
@@ -209,6 +216,15 @@ mod tests {
     #[test]
     fn escapes_xml_specials() {
         assert_eq!(escape("a<b>&\"'"), "a&lt;b&gt;&amp;&quot;&#39;");
+    }
+
+    #[test]
+    fn nul_bytes_are_stripped_not_panicked() {
+        // A NUL in the body would otherwise panic pango::parse_markup (C-string).
+        assert_eq!(to_pango("a\0b"), "ab");
+        assert!(!escape("x\0y").contains('\0'));
+        // Must still produce valid pango markup (no panic on the parse).
+        assert!(::pango::parse_markup(&to_pango("a\0<b>x</b>"), '\u{0}').is_ok());
     }
 
     #[test]
