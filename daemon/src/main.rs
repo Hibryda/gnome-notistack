@@ -28,8 +28,17 @@ fn main() -> anyhow::Result<()> {
 
     let cli = cli::Cli::parse();
     // Recover DISPLAY/XAUTHORITY from the systemd user env if we were autostarted
-    // before the session imported them (done here while still single-threaded).
-    render::manager::ensure_display_env();
+    // before the session imported them. Do this *here*, while still
+    // single-threaded (before the tokio runtime / gio), so the `set_var` is sound;
+    // retry briefly so a slightly-late session import is handled UB-free up front
+    // rather than relying on the render thread's last-resort self-heal.
+    for _ in 0..6 {
+        render::manager::ensure_display_env();
+        if std::env::var_os("DISPLAY").is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
     // Config comes from GSettings (live-reloaded by the render thread).
     let config = config::Config::load();
 

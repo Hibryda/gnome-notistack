@@ -39,6 +39,45 @@ pub mod reason {
 ///
 /// Both `0` = respect `natural`. When `min_ms >= max_ms > 0`, the ceiling is
 /// applied last and wins, so the result is the constant `max_ms`.
+/// Geometry-derived popup width (px): a fraction of the monitor *height*, capped
+/// at a fraction of its *width*, floored at 280. `width_px > 0` overrides.
+fn compute_popup_width(
+    width_px: u16,
+    width_height_fraction: f64,
+    max_width_fraction: f64,
+    mon_w: u16,
+    mon_h: u16,
+) -> u16 {
+    if width_px > 0 {
+        return width_px;
+    }
+    let by_height = mon_h as f64 * width_height_fraction;
+    let cap = mon_w as f64 * max_width_fraction;
+    by_height.min(cap).max(280.0).round() as u16
+}
+
+/// Top-right anchor `(x, top)` in px: the monitor intersected with the work area
+/// (so popups clear panels), then inset by `margin`. `x` is clamped to the usable
+/// area's left so a too-narrow work area can't push popups off-screen.
+fn compute_anchor(
+    mon: (i16, i16, u16, u16),
+    workarea: Option<(i32, i32, i32, i32)>,
+    width: i32,
+    margin: i32,
+) -> (i32, i32) {
+    let (mx, my, mw) = (mon.0 as i32, mon.1 as i32, mon.2 as i32);
+    let (ax, ay, aw) = match workarea {
+        Some((wx, wy, ww, _wh)) => {
+            let l = mx.max(wx);
+            let t = my.max(wy);
+            let r = (mx + mw).min(wx + ww);
+            (l, t, (r - l).max(0))
+        }
+        None => (mx, my, mw),
+    };
+    ((ax + aw - width - margin).max(ax), ay + margin)
+}
+
 fn effective_timeout(natural: Option<Duration>, min_ms: u64, max_ms: u64) -> Option<Duration> {
     let mut d = natural;
     if min_ms > 0 {
@@ -256,35 +295,26 @@ impl Manager {
         Ok(())
     }
 
-    /// Geometry-derived popup width (px): a fraction of the monitor *height*,
-    /// capped at a fraction of its *width*. `config.width_px` overrides when > 0.
+    /// Geometry-derived popup width (px), from the live config + render monitor.
     fn popup_width(&self) -> u16 {
-        if self.config.width_px > 0 {
-            return self.config.width_px;
-        }
-        let (w, h) = (self.mon.2 as f64, self.mon.3 as f64);
-        let by_height = h * self.config.width_height_fraction;
-        let cap = w * self.config.max_width_fraction;
-        by_height.min(cap).max(280.0).round() as u16
+        compute_popup_width(
+            self.config.width_px,
+            self.config.width_height_fraction,
+            self.config.max_width_fraction,
+            self.mon.2,
+            self.mon.3,
+        )
     }
 
-    /// Top-right anchor `(x, top)` in pixels, honoring `_NET_WORKAREA` so popups
-    /// start under the top bar / clear panels and docks.
+    /// Top-right anchor `(x, top)`, honoring `_NET_WORKAREA` so popups clear the
+    /// top bar / panels.
     fn anchor(&self) -> (i32, i32) {
-        let margin = self.config.margin_px as i32;
-        let (mx, my, mw) = (self.mon.0 as i32, self.mon.1 as i32, self.mon.2 as i32);
-        // Intersect the monitor with the work area (left, top, usable width).
-        let (ax, ay, aw) = match self.ui.workarea() {
-            Some((wx, wy, ww, _wh)) => {
-                let l = mx.max(wx);
-                let t = my.max(wy);
-                let r = (mx + mw).min(wx + ww);
-                (l, t, (r - l).max(0))
-            }
-            None => (mx, my, mw),
-        };
-        let width = self.popup_width() as i32;
-        (ax + aw - width - margin, ay + margin)
+        compute_anchor(
+            self.mon,
+            self.ui.workarea(),
+            self.popup_width() as i32,
+            self.config.margin_px as i32,
+        )
     }
 
     fn deadline(&self, n: &Notification) -> Option<Instant> {
@@ -826,8 +856,37 @@ pub fn run(
 
 #[cfg(test)]
 mod tests {
-    use super::effective_timeout;
+    use super::{compute_anchor, compute_popup_width, effective_timeout};
     use std::time::Duration;
+
+    #[test]
+    fn popup_width_geometry() {
+        // Explicit override wins.
+        assert_eq!(compute_popup_width(500, 0.30, 0.18, 5120, 1440), 500);
+        // Height-driven (1440*0.30=432 < 5120*0.18=921).
+        assert_eq!(compute_popup_width(0, 0.30, 0.18, 5120, 1440), 432);
+        // Width-cap binds (1440*0.30=432 > 800*0.18=144 → 280 floor).
+        assert_eq!(compute_popup_width(0, 0.30, 0.18, 800, 1440), 280);
+        // 280 floor on a tiny monitor.
+        assert_eq!(compute_popup_width(0, 0.30, 0.18, 200, 200), 280);
+    }
+
+    #[test]
+    fn anchor_geometry() {
+        // No work area → raw monitor; top-right inset by margin.
+        assert_eq!(
+            compute_anchor((0, 0, 1920, 1080), None, 400, 16),
+            (1920 - 400 - 16, 16)
+        );
+        // Top panel (workarea y=27) → popups start under it.
+        assert_eq!(
+            compute_anchor((0, 0, 1920, 1080), Some((0, 27, 1920, 1053)), 400, 16),
+            (1920 - 400 - 16, 27 + 16)
+        );
+        // Degenerate (work area narrower than the popup) → x clamped to left edge.
+        let (x, _) = compute_anchor((0, 0, 1920, 1080), Some((0, 0, 100, 1080)), 400, 16);
+        assert_eq!(x, 0);
+    }
 
     fn ms(n: u64) -> Option<Duration> {
         Some(Duration::from_millis(n))
