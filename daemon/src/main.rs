@@ -58,8 +58,14 @@ async fn run(config: config::Config) -> anyhow::Result<()> {
     let render_thread = std::thread::Builder::new()
         .name("notistack-render".into())
         .spawn(move || {
+            // run() returns Ok only on a clean shutdown. Any error means the render
+            // thread can't function (e.g. X never became reachable within the retry
+            // window) — exit the whole process so systemd's Restart= gives us a
+            // fresh attempt, rather than lingering as a render-less zombie that
+            // silently drops every notification.
             if let Err(e) = render::manager::run(rx, fb_tx, render_config) {
-                error!(error = %e, "render thread exited with error");
+                error!(error = %e, "render thread failed; exiting for a systemd restart");
+                std::process::exit(1);
             }
         })
         .context("spawning render thread")?;
