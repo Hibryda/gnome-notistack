@@ -30,15 +30,6 @@ pub mod reason {
     pub const CLOSED_BY_CALL: u32 = 3;
 }
 
-/// Effective display duration from a notification's `natural` expiry (None =
-/// never-expire), applying the config floor (`min_ms`) then ceiling (`max_ms`).
-///
-/// - `min_ms` raises a finite expiry so it shows at least that long; a
-///   never-expire popup already satisfies any floor, so it is left untouched.
-/// - `max_ms` caps everything, including never-expire popups.
-///
-/// Both `0` = respect `natural`. When `min_ms >= max_ms > 0`, the ceiling is
-/// applied last and wins, so the result is the constant `max_ms`.
 /// Geometry-derived popup width (px): a fraction of the monitor *height*, capped
 /// at a fraction of its *width*, floored at 280. `width_px > 0` overrides.
 fn compute_popup_width(
@@ -78,6 +69,15 @@ fn compute_anchor(
     ((ax + aw - width - margin).max(ax), ay + margin)
 }
 
+/// Effective display duration from a notification's `natural` expiry (None =
+/// never-expire), applying the config floor (`min_ms`) then ceiling (`max_ms`).
+///
+/// - `min_ms` raises a finite expiry so it shows at least that long; a
+///   never-expire popup already satisfies any floor, so it is left untouched.
+/// - `max_ms` caps everything, including never-expire popups.
+///
+/// Both `0` = respect `natural`. When `min_ms >= max_ms > 0`, the ceiling is
+/// applied last and wins, so the result is the constant `max_ms`.
 fn effective_timeout(natural: Option<Duration>, min_ms: u64, max_ms: u64) -> Option<Duration> {
     let mut d = natural;
     if min_ms > 0 {
@@ -102,7 +102,6 @@ enum Fade {
     Out(Instant, u32),
 }
 
-/// One on-screen popup and its cached pixels (for Expose redraws).
 /// Decoded image assets for a popup, cached so a hover re-render (frequent) does
 /// not re-decode the icon/inline images each time. Re-decoded only on show and on
 /// a live config change (where the icon theme may have changed).
@@ -114,6 +113,7 @@ struct DecodedAssets {
     inline_images: Vec<(Vec<u8>, i32, i32)>,
 }
 
+/// One on-screen popup and its cached pixels (for Expose redraws).
 struct Popup {
     id: NotificationId,
     window: Window,
