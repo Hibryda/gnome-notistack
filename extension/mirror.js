@@ -38,35 +38,41 @@ export class Mirror {
             Gio.DBus.session.signal_unsubscribe(this._subId);
             this._subId = 0;
         }
-        for (const src of this._sources.values())
-            src.destroy();
+        // Snapshot first: src.destroy() fires the 'destroy' handler synchronously,
+        // which mutates this._sources — don't mutate while iterating it.
+        const sources = [...this._sources.values()];
         this._sources.clear();
+        for (const src of sources)
+            src.destroy();
     }
 
-    _source(appName, appIcon) {
+    _source(appName) {
         const existing = this._sources.get(appName);
         if (existing)
             return existing;
-        const params = { title: appName || 'Notifications' };
-        if (appIcon) {
-            if (appIcon.startsWith('/') || appIcon.startsWith('file://'))
-                params.icon = Gio.icon_new_for_string(appIcon);
-            else
-                params.iconName = appIcon;
-        }
-        const source = new MessageTray.Source(params);
+        // Icon comes from untrusted notification content. Only allow a themed
+        // name (no attacker file:// / absolute path handed to the shell's icon
+        // loader). The daemon's own popup decodes the real image for display.
+        const source = new MessageTray.Source({
+            title: appName || 'Notifications',
+            iconName: 'dialog-information-symbolic',
+        });
         source.connect('destroy', () => this._sources.delete(appName));
         Main.messageTray.add(source);
         this._sources.set(appName, source);
         return source;
     }
 
-    _post(appName, appIcon, summary, body) {
-        const source = this._source(appName, appIcon);
+    _post(appName, _appIcon, summary, body) {
+        const source = this._source(appName);
         const notification = new MessageTray.Notification({
             source,
             title: summary || appName || 'Notification',
             body: body || '',
+            // Pin the safe defaults explicitly: body is plain text (never parse
+            // attacker markup in the shell process), and the entry just lists
+            // (the daemon already showed the banner-equivalent popup).
+            useBodyMarkup: false,
             isTransient: false,
         });
         notification.acknowledged = true; // list it, don't re-banner

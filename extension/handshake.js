@@ -124,9 +124,10 @@ async function takeoverFdo() {
     reportEvent('FDO_RELEASED', `pid=${pid}`);
 }
 
-/** Phase B — release the GTK name from inside the shell (queued daemon promoted). */
+/** Phase B — release the GTK name from inside the shell (queued daemon promoted).
+ *  Resolves to whether the name was actually released. */
 async function takeoverGtk() {
-    await new Promise(resolve => {
+    return new Promise(resolve => {
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 0, () => {
             bus().call(DBUS, DBUS_PATH, DBUS, 'ReleaseName',
                 new GLib.Variant('(s)', [GTK_NAME]), null,
@@ -134,11 +135,12 @@ async function takeoverGtk() {
                     try {
                         conn.call_finish(res);
                         reportEvent('GTK_RELEASED', GTK_NAME);
+                        resolve(true); // resolve AFTER completion (was: before)
                     } catch (e) {
                         reportEvent('GTK_RELEASE_FAILED', e.message);
+                        resolve(false);
                     }
                 });
-            resolve();
             return GLib.SOURCE_REMOVE;
         });
     });
@@ -146,32 +148,45 @@ async function takeoverGtk() {
 
 /**
  * Run the takeover. Never frees a name unless our daemon is up and ready to claim
- * it — the missing precondition that crashed the shell at login.
- * @param {{allowGtkTakeover: boolean}} opts
+ * it — the missing precondition that crashed the shell at login. Returns whether
+ * the GTK name ended up taken over (so the caller knows whether restore() must
+ * re-own it — setting that flag before this runs caused restore() to re-own a
+ * name that was never freed).
+ * @param {{allowGtkTakeover: boolean, cancelled?: () => boolean}} opts
+ * @returns {Promise<boolean>}
  */
 export async function takeover(opts) {
+    const cancelled = opts.cancelled || (() => false);
     if (await takeoverAlreadyDone()) {
         reportEvent('FASTPATH', 'daemon already owns the Fdo name');
-        return;
+        return opts.allowGtkTakeover; // a prior run freed GTK iff takeover is on
     }
     // Gate: the daemon must be running/ready (it may be starting via systemd
     // concurrently). Retry briefly; if it never appears, do NOTHING — freeing the
     // names with no claimant is what segfaulted the shell.
     let ready = false;
     for (let i = 0; i < 12 && !ready; i++) {
+        if (cancelled())
+            return false;
         ready = await daemonReady();
         if (!ready)
             await sleep(500);
     }
     if (!ready) {
         reportEvent('SKIPPED_NO_DAEMON', 'daemon not ready; takeover skipped');
-        return;
+        return false;
+    }
+    // Bail if the extension was disabled while we were waiting — don't free names
+    // after disable() already ran restore().
+    if (cancelled()) {
+        reportEvent('SKIPPED_CANCELLED', 'disabled during takeover');
+        return false;
     }
     await takeoverFdo();
-    if (opts.allowGtkTakeover)
-        await takeoverGtk();
-    else
-        reportEvent('GTK_SKIPPED', 'allowGtkTakeover=false');
+    if (opts.allowGtkTakeover && !cancelled())
+        return await takeoverGtk();
+    reportEvent('GTK_SKIPPED', 'allowGtkTakeover=false or cancelled');
+    return false;
 }
 
 /**
@@ -185,11 +200,15 @@ export async function restore({ gtkWasTakenOver }) {
 
     // Reactivate the gjs proxy so it reclaims org.freedesktop.Notifications.
     await dbusCall(DBUS, DBUS_PATH, DBUS, 'StartServiceByName',
-        new GLib.Variant('(su)', [SHELL_NOTIFICATIONS, 0])).catch(() => {});
+        new GLib.Variant('(su)', [SHELL_NOTIFICATIONS, 0]))
+        .catch(e => reportEvent('PROXY_REACTIVATE_FAILED', e.message));
 
-    // Re-own the freed GTK name for the shell.
-    if (gtkWasTakenOver)
-        Gio.DBus.session.own_name(GTK_NAME, Gio.BusNameOwnerFlags.REPLACE, null, null);
+    // Re-own the freed GTK name for the shell (log if the shell fails to reclaim).
+    if (gtkWasTakenOver) {
+        Gio.DBus.session.own_name(
+            GTK_NAME, Gio.BusNameOwnerFlags.REPLACE, null,
+            () => logError(new Error('gnome-notistack: shell failed to re-own org.gtk.Notifications')));
+    }
 
     return { needsShellRestart: false };
 }

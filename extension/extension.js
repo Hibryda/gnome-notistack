@@ -31,6 +31,7 @@ export default class NotistackTakeoverExtension extends Extension {
     enable() {
         this._gtkTakenOver = false;
         this._takeoverTimeout = 0;
+        this._cancelled = false;
 
         // Version guard: this technique is validated only against GNOME 48.x.
         const [major] = Config.PACKAGE_VERSION.split('.');
@@ -45,19 +46,28 @@ export default class NotistackTakeoverExtension extends Extension {
         this._mirror = new Mirror();
         this._mirror.enable();
 
-        this._gtkTakenOver = ALLOW_GTK_TAKEOVER;
         // Defer out of the shell-init window; the takeover itself is gated on the
-        // daemon being ready, so it never destabilizes the shell.
+        // daemon being ready, so it never destabilizes the shell. `_gtkTakenOver`
+        // is set from the *result* so restore() only re-owns GTK if it was freed.
         this._takeoverTimeout = GLib.timeout_add_seconds(
             GLib.PRIORITY_DEFAULT, TAKEOVER_DELAY_SECONDS, () => {
                 this._takeoverTimeout = 0;
-                Handshake.takeover({ allowGtkTakeover: ALLOW_GTK_TAKEOVER })
+                Handshake.takeover({
+                    allowGtkTakeover: ALLOW_GTK_TAKEOVER,
+                    cancelled: () => this._cancelled,
+                })
+                    .then(gtkTaken => {
+                        if (!this._cancelled)
+                            this._gtkTakenOver = gtkTaken;
+                    })
                     .catch(e => logError(e, 'gnome-notistack: takeover failed'));
                 return GLib.SOURCE_REMOVE;
             });
     }
 
     disable() {
+        // Cancel any in-flight takeover so it can't free names after restore().
+        this._cancelled = true;
         if (this._takeoverTimeout) {
             GLib.source_remove(this._takeoverTimeout);
             this._takeoverTimeout = 0;
