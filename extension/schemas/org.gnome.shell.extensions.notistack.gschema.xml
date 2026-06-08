@@ -52,6 +52,10 @@
       <default>16</default>
       <summary>Margin from the screen corner (px)</summary>
     </key>
+    <key name="placement" type="s">
+      <default>'top-right'</default>
+      <summary>Screen placement: top-left/top-center/top-right/bottom-left/bottom-center/bottom-right (bottom stacks upward)</summary>
+    </key>
     <key name="monitor" type="s">
       <default>'primary'</default>
       <summary>Monitor to show popups on ('primary', 'focused' = the one under the pointer, or a connector like DP-1)</summary>

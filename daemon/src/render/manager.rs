@@ -47,26 +47,43 @@ fn compute_popup_width(
     by_height.min(cap).max(280.0).round() as u16
 }
 
-/// Top-right anchor `(x, top)` in px: the monitor intersected with the work area
-/// (so popups clear panels), then inset by `margin`. `x` is clamped to the usable
-/// area's left so a too-narrow work area can't push popups off-screen.
-fn compute_anchor(
+/// The usable rectangle `(x, y, w, h)`: the monitor intersected with the work
+/// area, so popups clear panels/docks on every edge.
+fn usable_rect(
     mon: (i16, i16, u16, u16),
     workarea: Option<(i32, i32, i32, i32)>,
-    width: i32,
-    margin: i32,
-) -> (i32, i32) {
-    let (mx, my, mw) = (mon.0 as i32, mon.1 as i32, mon.2 as i32);
-    let (ax, ay, aw) = match workarea {
-        Some((wx, wy, ww, _wh)) => {
+) -> (i32, i32, i32, i32) {
+    let (mx, my, mw, mh) = (mon.0 as i32, mon.1 as i32, mon.2 as i32, mon.3 as i32);
+    match workarea {
+        Some((wx, wy, ww, wh)) => {
             let l = mx.max(wx);
             let t = my.max(wy);
             let r = (mx + mw).min(wx + ww);
-            (l, t, (r - l).max(0))
+            let b = (my + mh).min(wy + wh);
+            (l, t, (r - l).max(0), (b - t).max(0))
         }
-        None => (mx, my, mw),
+        None => (mx, my, mw, mh),
+    }
+}
+
+/// Whether the placement string anchors to the bottom edge (stack grows upward).
+fn placement_is_bottom(placement: &str) -> bool {
+    placement.starts_with("bottom")
+}
+
+/// X coordinate for `width` within usable `[ax, ax+aw)` per the placement's
+/// horizontal alignment, clamped to the usable left so a narrow area can't push
+/// popups off-screen.
+fn place_x(placement: &str, ax: i32, aw: i32, width: i32, margin: i32) -> i32 {
+    let x = if placement.ends_with("-left") {
+        ax + margin
+    } else if placement.ends_with("-center") {
+        ax + (aw - width) / 2
+    } else {
+        // -right (and the default)
+        ax + aw - width - margin
     };
-    ((ax + aw - width - margin).max(ax), ay + margin)
+    x.max(ax)
 }
 
 /// Effective display duration from a notification's `natural` expiry (None =
@@ -339,15 +356,25 @@ impl Manager {
         }
     }
 
-    /// Top-right anchor `(x, top)`, honoring `_NET_WORKAREA` so popups clear the
-    /// top bar / panels.
+    /// Approximate spawn position `(x, y)` for a new window — the correct x for
+    /// the placement, anchored near the top/bottom edge. `reflow` immediately
+    /// repositions every window precisely, so this only needs to be close.
     fn anchor(&self) -> (i32, i32) {
-        compute_anchor(
-            self.mon,
-            self.ui.workarea(),
+        let (ax, ay, aw, ah) = usable_rect(self.mon, self.ui.workarea());
+        let margin = self.config.margin_px as i32;
+        let x = place_x(
+            &self.config.placement,
+            ax,
+            aw,
             self.popup_width() as i32,
-            self.config.margin_px as i32,
-        )
+            margin,
+        );
+        let y = if placement_is_bottom(&self.config.placement) {
+            ay + ah - margin
+        } else {
+            ay + margin
+        };
+        (x, y)
     }
 
     fn deadline(&self, n: &Notification) -> Option<Instant> {
@@ -704,24 +731,52 @@ impl Manager {
         self.reflow()
     }
 
-    /// Reposition popups top-down (newest at top) with one batched flush.
-    /// Reposition popups top-down with a running y-cursor (each card's own height
-    /// + gap), so variable-height cards neither overlap nor leave wide gaps.
+    /// Reposition every popup with a running y-cursor (each card's own height +
+    /// gap, so variable-height cards neither overlap nor gap), honoring the
+    /// configured placement. Top placements stack downward (newest on top, index
+    /// 0 at the top edge); bottom placements stack upward (newest at the bottom).
+    /// The "+N more" tile continues past the oldest popup in the growth direction.
     fn reflow(&mut self) -> Result<()> {
-        let (x, top) = self.anchor();
+        let (ax, ay, aw, ah) = usable_rect(self.mon, self.ui.workarea());
+        let margin = self.config.margin_px as i32;
         let gap = self.config.gap_px as i32;
-        let mut y = top;
-        for p in &self.popups {
-            self.ui
-                .conn
-                .configure_window(p.window, &ConfigureWindowAux::new().x(x).y(y))?;
-            y += p.height as i32 + gap;
-        }
-        // The "+N more" tile sits below the stack.
-        if let Some((win, _)) = self.overflow_tile {
-            self.ui
-                .conn
-                .configure_window(win, &ConfigureWindowAux::new().x(x).y(y))?;
+        let x = place_x(
+            &self.config.placement,
+            ax,
+            aw,
+            self.popup_width() as i32,
+            margin,
+        );
+
+        if placement_is_bottom(&self.config.placement) {
+            // Grow upward from the bottom edge; window y is the card's top edge.
+            let mut y = ay + ah - margin;
+            for p in &self.popups {
+                y -= p.height as i32;
+                self.ui
+                    .conn
+                    .configure_window(p.window, &ConfigureWindowAux::new().x(x).y(y))?;
+                y -= gap;
+            }
+            if let Some((win, h)) = self.overflow_tile {
+                y -= h as i32;
+                self.ui
+                    .conn
+                    .configure_window(win, &ConfigureWindowAux::new().x(x).y(y))?;
+            }
+        } else {
+            let mut y = ay + margin;
+            for p in &self.popups {
+                self.ui
+                    .conn
+                    .configure_window(p.window, &ConfigureWindowAux::new().x(x).y(y))?;
+                y += p.height as i32 + gap;
+            }
+            if let Some((win, _)) = self.overflow_tile {
+                self.ui
+                    .conn
+                    .configure_window(win, &ConfigureWindowAux::new().x(x).y(y))?;
+            }
         }
         self.ui.conn.flush()?;
         Ok(())
@@ -1089,7 +1144,9 @@ pub fn run(
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_anchor, compute_popup_width, effective_timeout};
+    use super::{
+        compute_popup_width, effective_timeout, place_x, placement_is_bottom, usable_rect,
+    };
     use std::time::Duration;
 
     #[test]
@@ -1105,20 +1162,31 @@ mod tests {
     }
 
     #[test]
-    fn anchor_geometry() {
-        // No work area → raw monitor; top-right inset by margin.
+    fn usable_rect_intersects_workarea() {
+        // No work area → raw monitor.
+        assert_eq!(usable_rect((0, 0, 1920, 1080), None), (0, 0, 1920, 1080));
+        // Top panel (y=27, h=1053) → usable starts under it.
         assert_eq!(
-            compute_anchor((0, 0, 1920, 1080), None, 400, 16),
-            (1920 - 400 - 16, 16)
+            usable_rect((0, 0, 1920, 1080), Some((0, 27, 1920, 1053))),
+            (0, 27, 1920, 1053)
         );
-        // Top panel (workarea y=27) → popups start under it.
-        assert_eq!(
-            compute_anchor((0, 0, 1920, 1080), Some((0, 27, 1920, 1053)), 400, 16),
-            (1920 - 400 - 16, 27 + 16)
-        );
-        // Degenerate (work area narrower than the popup) → x clamped to left edge.
-        let (x, _) = compute_anchor((0, 0, 1920, 1080), Some((0, 0, 100, 1080)), 400, 16);
-        assert_eq!(x, 0);
+    }
+
+    #[test]
+    fn place_x_alignment() {
+        // ax=0, aw=1920, width=400, margin=16
+        assert_eq!(place_x("top-left", 0, 1920, 400, 16), 16);
+        assert_eq!(place_x("top-right", 0, 1920, 400, 16), 1920 - 400 - 16);
+        assert_eq!(place_x("bottom-center", 0, 1920, 400, 16), (1920 - 400) / 2);
+        // Narrower-than-popup area → clamp to the left edge.
+        assert_eq!(place_x("top-right", 0, 100, 400, 16), 0);
+    }
+
+    #[test]
+    fn placement_bottom_detection() {
+        assert!(placement_is_bottom("bottom-left"));
+        assert!(placement_is_bottom("bottom-center"));
+        assert!(!placement_is_bottom("top-right"));
     }
 
     fn ms(n: u64) -> Option<Duration> {

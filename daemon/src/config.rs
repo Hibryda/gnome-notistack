@@ -52,6 +52,9 @@ pub struct Config {
     pub width_height_fraction: f64,
     pub max_width_fraction: f64,
     pub margin_px: u16,
+    /// Screen placement: top-left|top-center|top-right|bottom-left|bottom-center|
+    /// bottom-right. Bottom placements stack upward.
+    pub placement: String,
     /// Monitor to render on: "primary" or a RandR connector name (e.g. "DP-1").
     pub monitor: String,
     /// Active icon theme (from the system), used to resolve themed app icons.
@@ -85,6 +88,7 @@ impl Default for Config {
             width_height_fraction: 0.30,
             max_width_fraction: 0.18,
             margin_px: 16,
+            placement: "top-right".to_string(),
             monitor: "primary".to_string(),
             icon_theme: "hicolor".to_string(),
             font_family: "Sans".to_string(),
@@ -140,6 +144,7 @@ impl Config {
         c.width_height_fraction = ours.double("width-height-fraction");
         c.max_width_fraction = ours.double("max-width-fraction");
         c.margin_px = ours.uint("margin-px") as u16;
+        c.placement = ours.string("placement").to_string();
         c.monitor = ours.string("monitor").to_string();
         c.title_body_gap_px = ours.uint("title-body-gap-px") as u16;
         c.fade_ms = ours.uint("fade-ms") as u64;

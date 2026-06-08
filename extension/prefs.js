@@ -105,6 +105,23 @@ function addThemeCombo(group, settings) {
     group.add(row);
 }
 
+function addPlacementCombo(group, settings) {
+    const options = [
+        ['top-left', 'Top left'], ['top-center', 'Top center'], ['top-right', 'Top right'],
+        ['bottom-left', 'Bottom left'], ['bottom-center', 'Bottom center'], ['bottom-right', 'Bottom right'],
+    ];
+    const model = new Gtk.StringList();
+    options.forEach(([, label]) => model.append(label));
+    const keys = options.map(([k]) => k);
+    const row = new Adw.ComboRow({ title: 'Placement', subtitle: 'Bottom positions stack upward', model });
+    ignoreScroll(row);
+    const sync = () => row.set_selected(Math.max(0, keys.indexOf(settings.get_string('placement'))));
+    sync();
+    row.connect('notify::selected', () => settings.set_string('placement', keys[row.get_selected()]));
+    settings.connect('changed::placement', sync);
+    group.add(row);
+}
+
 export default class NotistackPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings('org.gnome.shell.extensions.notistack');
@@ -131,6 +148,7 @@ export default class NotistackPreferences extends ExtensionPreferences {
             description: 'Width derives from the monitor unless an absolute width is set.',
         });
         page.add(layout);
+        addPlacementCombo(layout, settings);
         addMonitorCombo(layout, settings);
         addSpin(layout, settings, 'width-px', 'Width (px, 0 = automatic)',
             { lower: 0, upper: 4000, step: 10 });
