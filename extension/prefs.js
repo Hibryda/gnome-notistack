@@ -60,7 +60,10 @@ function addEntry(group, settings, key, title) {
 }
 
 function addMonitorCombo(group, settings) {
-    const options = [['primary', 'Primary (follow)']];
+    const options = [
+        ['primary', 'Primary'],
+        ['focused', 'Focused (monitor under the pointer)'],
+    ];
     try {
         const monitors = Gdk.Display.get_default()?.get_monitors();
         const n = monitors?.get_n_items() ?? 0;

@@ -208,10 +208,7 @@ impl Manager {
         self.config = new;
         self.history.set_cap(self.config.history_size);
         // The target monitor may have changed.
-        self.mon = self
-            .ui
-            .monitor_geometry(&self.config.monitor)
-            .unwrap_or(self.mon);
+        self.mon = self.resolve_mon();
         // Fade just turned off: snap fading-in popups visible, and finish any
         // in-progress fade-out now (advance_fades no-ops when fade_ms == 0, so
         // they'd otherwise be stranded invisible / never closed).
@@ -320,6 +317,19 @@ impl Manager {
             self.mon.2,
             self.mon.3,
         )
+    }
+
+    /// Resolve the target monitor from config: `focused` → the monitor under the
+    /// pointer; otherwise the named connector (or primary). Falls back to the
+    /// current `self.mon` if the lookup fails.
+    fn resolve_mon(&self) -> (i16, i16, u16, u16) {
+        if self.config.monitor == "focused" {
+            self.ui.pointer_monitor().unwrap_or(self.mon)
+        } else {
+            self.ui
+                .monitor_geometry(&self.config.monitor)
+                .unwrap_or(self.mon)
+        }
     }
 
     /// Top-right anchor `(x, top)`, honoring `_NET_WORKAREA` so popups clear the
@@ -441,6 +451,11 @@ impl Manager {
         if self.suppressed() {
             self.enqueue(n);
             return Ok(());
+        }
+        // With `monitor=focused`, a fresh batch (empty stack) follows the pointer's
+        // monitor; while popups are live the stack stays put (no mid-stack split).
+        if self.config.monitor == "focused" && self.popups.is_empty() {
+            self.mon = self.resolve_mon();
         }
         // Record only when actually displaying — recording before the suppression
         // check meant queued-then-dropped notifications entered history unseen.

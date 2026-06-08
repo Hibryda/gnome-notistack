@@ -54,7 +54,7 @@
     </key>
     <key name="monitor" type="s">
       <default>'primary'</default>
-      <summary>Monitor to show popups on ('primary' or a connector like DP-1)</summary>
+      <summary>Monitor to show popups on ('primary', 'focused' = the one under the pointer, or a connector like DP-1)</summary>
     </key>
 
     <!-- Text (empty/0 = take from the system theme) -->

@@ -250,6 +250,22 @@ impl Ui {
         self.primary_geometry()
     }
 
+    /// Geometry of the monitor currently under the pointer (for `monitor=focused`).
+    /// `None` if the pointer/monitor query fails or no monitor contains it.
+    pub fn pointer_monitor(&self) -> Option<(i16, i16, u16, u16)> {
+        let p = self.conn.query_pointer(self.root).ok()?.reply().ok()?;
+        let (px, py) = (p.root_x as i32, p.root_y as i32);
+        let reply = self.conn.randr_get_monitors(self.root, true).ok()?.reply().ok()?;
+        reply
+            .monitors
+            .iter()
+            .find(|m| {
+                let (x, y, w, h) = (m.x as i32, m.y as i32, m.width as i32, m.height as i32);
+                px >= x && px < x + w && py >= y && py < y + h
+            })
+            .map(|m| (m.x, m.y, m.width, m.height))
+    }
+
     /// Create (unmapped) an ARGB32 override-redirect popup with EWMH hints set.
     pub fn create_popup(&self, x: i16, y: i16, w: u16, h: u16) -> Result<Window> {
         let win = self.conn.generate_id().context("generate window id")?;
