@@ -224,18 +224,34 @@ impl Manager {
             return Ok(());
         };
         let new = Config::from_settings(ours, iface.as_ref());
-        if new == self.config {
+        let config_changed = new != self.config;
+        // Re-resolve the monitor every poll so a hardware change (switching
+        // monitors, a resolution / primary change) is sensed even when the config
+        // itself didn't change — otherwise self.mon stays stale and popups anchor to
+        // the old geometry. "focused" is pointer-driven (resolved per batch in
+        // show()), so don't chase the pointer here.
+        let new_mon = if new.monitor == "focused" {
+            self.mon
+        } else {
+            self.ui.monitor_geometry(&new.monitor).unwrap_or(self.mon)
+        };
+        let mon_changed = new_mon != self.mon;
+        if !config_changed && !mon_changed {
             return Ok(());
         }
-        info!("config changed — applying live");
-        let fade_disabled = self.config.fade_ms > 0 && new.fade_ms == 0;
-        if self.config.gtk_takeover != new.gtk_takeover {
+        if config_changed {
+            info!("config changed — applying live");
+        }
+        if mon_changed {
+            info!(?new_mon, "monitor geometry changed — re-anchoring popups");
+        }
+        let fade_disabled = config_changed && self.config.fade_ms > 0 && new.fade_ms == 0;
+        if config_changed && self.config.gtk_takeover != new.gtk_takeover {
             warn!("gtk-takeover change requires a daemon restart to take effect");
         }
         self.config = new;
         self.history.set_cap(self.config.history_size);
-        // The target monitor may have changed.
-        self.mon = self.resolve_mon();
+        self.mon = new_mon;
         // Fade just turned off: snap fading-in popups visible, and finish any
         // in-progress fade-out now (advance_fades no-ops when fade_ms == 0, so
         // they'd otherwise be stranded invisible / never closed).
