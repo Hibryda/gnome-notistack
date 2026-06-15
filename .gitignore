@@ -1,25 +1,48 @@
-# Rust
+# Constrained .gitignore for the PUBLIC GitHub mirror.
+#
+# scripts/publish-github.sh applies this as `.gitignore` and uses git-filter-repo
+# to strip the paths below from the mirror's entire history. The Forgejo origin
+# keeps the relaxed `.gitignore` and the full working context (Claude tooling,
+# research, planning docs).
+
+# --- Rust / build artifacts ---
 /target
 **/*.rs.bk
+extension/schemas/gschemas.compiled
 
-# Editor / OS
+# --- Editor / OS ---
 *.swp
 *~
 .DS_Store
 .idea/
-
-# VS Code: ignore personal, commit shared project config
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
 
-# Local scratch
+# --- Local scratch / run artifacts ---
 /scratch/
-
-# Tribunal / hypertribunal run artifacts
 .tribunal/
 
-# Compiled GSettings schema (build artifact)
-extension/schemas/gschemas.compiled
+# === Excluded from the public mirror ===
+
+# Claude Code instrumentation
+.claude/
+/CLAUDE.md
+**/CLAUDE.md
+.mcp.json
+/memory/
+
+# Design / planning / research (internal prep)
+RESEARCH-BRIEF.md
+research/
+docs/IMPLEMENTATION-PLAN.md
+docs/gnome48-audit.md
+docs/known-loss.md
+docs/private-interface.md
+docs/README.md
+
+# Internal roadmap + the publish tooling itself
+TODO.md
+scripts/publish-github.sh
