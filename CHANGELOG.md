@@ -5,6 +5,8 @@ All notable changes to gnome-notistack are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-06-15
+
 ### Fixed
 - Notifications no longer blink/flicker when an app rapidly closes and re-posts
   the same notification (Chromium update churn — Vivaldi, Discord/Electron send
