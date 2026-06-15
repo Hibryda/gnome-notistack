@@ -30,6 +30,11 @@ pub mod reason {
     pub const CLOSED_BY_CALL: u32 = 3;
 }
 
+/// Grace period before an app `CloseNotification` actually closes a popup. A
+/// re-Notify for the same id within this window cancels the close (debounces the
+/// Chromium Notify→Close→Notify update churn — see `defer_close`).
+const CLOSE_GRACE: Duration = Duration::from_millis(200);
+
 /// Geometry-derived popup width (px): a fraction of the monitor *height*, capped
 /// at a fraction of its *width*, floored at 280. `width_px > 0` overrides.
 fn compute_popup_width(
@@ -152,6 +157,13 @@ struct Popup {
     hover: Option<usize>,
     /// Whether this popup currently shows the "freshest" accent (index 0 only).
     fresh: bool,
+    /// When the popup was (last) displayed — the anchor for auto-expiry, so the
+    /// timeout counts from display, not from D-Bus receipt (FDO spec).
+    shown_at: Instant,
+    /// A debounced `CloseNotification`: `(when_to_close, reason)`. Chromium apps
+    /// (Vivaldi, Electron) churn Notify→Close→Notify on update; deferring the close
+    /// briefly lets a re-Notify cancel it instead of flickering the popup away.
+    close_pending: Option<(Instant, u32)>,
 }
 
 struct Manager {
@@ -279,8 +291,9 @@ impl Manager {
             let assets = self.decode_assets(&n);
             let fresh = i == 0;
             let (pixels, stride, height, regions) = self.render_pixels(&n, &assets, None, fresh)?;
-            // Re-evaluate expiry so a changed min/max-timeout applies to live popups.
-            let expires_at = self.deadline(&n);
+            // Re-evaluate expiry so a changed min/max-timeout applies live, but
+            // anchored to the popup's display time (don't reset the timer on a poll).
+            let expires_at = self.deadline(&n, self.popups[i].shown_at);
             let win = self.popups[i].window;
             let w = self.popup_width() as u32;
             self.ui.conn.configure_window(
@@ -397,7 +410,10 @@ impl Manager {
         (x, y)
     }
 
-    fn deadline(&self, n: &Notification) -> Option<Instant> {
+    /// Auto-expiry instant for `n`, measured from `base` (the display time, not
+    /// D-Bus receipt — so a queued/promoted/delayed notification still shows for
+    /// its full duration instead of expiring instantly; FDO spec § timeout).
+    fn deadline(&self, n: &Notification, base: Instant) -> Option<Instant> {
         // The notification's own expiry duration (None = never, e.g. critical).
         let natural = n.auto_expires().then(|| match n.expire_timeout_ms {
             Some(v) if v > 0 => Duration::from_millis(v as u64),
@@ -409,7 +425,7 @@ impl Manager {
             self.config.min_timeout_ms,
             self.config.max_timeout_ms,
         )
-        .map(|d| n.created + d)
+        .map(|d| base + d)
     }
 
     /// Decode a notification's icon + inline images (the expensive, content-only
@@ -516,33 +532,43 @@ impl Manager {
         // Record only when actually displaying — recording before the suppression
         // check meant queued-then-dropped notifications entered history unseen.
         self.history.record(&n);
-        let expires_at = self.deadline(&n);
+        let shown_at = Instant::now();
+        let expires_at = self.deadline(&n, shown_at);
         let default_action = n.default_action.clone();
         let assets = self.decode_assets(&n);
         // Render fresh; reflow's update_fresh_marker reconciles if an in-place
         // update lands on a non-top popup.
         let (pixels, stride, height, regions) = self.render_pixels(&n, &assets, None, true)?;
 
-        // replaces_id / dedup: update in place if the id is already displayed
-        // (and not already fading out).
-        if let Some(idx) = self
-            .popups
-            .iter()
-            .position(|p| p.id == n.id && !matches!(p.fade, Fade::Out(..)))
-        {
+        // replaces_id / dedup: update in place if the id is already displayed —
+        // INCLUDING one that's fading out (revive it) or has a debounced close
+        // pending (cancel it). This absorbs the Chromium Notify→Close→Notify
+        // update churn instead of spawning a duplicate popup (the blink).
+        if let Some(idx) = self.popups.iter().position(|p| p.id == n.id) {
             let resize;
+            let revived;
             {
                 let p = &mut self.popups[idx];
                 p.pixels = pixels;
                 p.stride = stride;
                 p.expires_at = expires_at;
+                p.shown_at = shown_at;
                 p.default_action = default_action;
                 p.regions = regions;
                 p.assets = assets;
                 p.hover = None;
                 p.fresh = true; // matches the fresh render; reflow reconciles
+                p.close_pending = None; // a re-Notify cancels a pending close
+                revived = matches!(p.fade, Fade::Out(..));
+                if revived {
+                    p.fade = Fade::Visible;
+                }
                 resize = p.height != height;
                 p.height = height;
+            }
+            if revived {
+                // Snap back to full opacity (it was mid fade-out).
+                let _ = self.ui.set_opacity(self.popups[idx].window, 1.0);
             }
             if resize {
                 let win = self.popups[idx].window;
@@ -634,6 +660,8 @@ impl Manager {
                 regions,
                 hover: None,
                 fresh: true,
+                shown_at,
+                close_pending: None,
             },
         );
         self.refresh_overflow_tile()?;
@@ -643,7 +671,8 @@ impl Manager {
     /// Render+map a held notification at `index` in the visible stack (used to
     /// promote from overflow; history/sound/mirror already happened on first show).
     fn place_popup(&mut self, n: Notification, index: usize) -> Result<()> {
-        let expires_at = self.deadline(&n);
+        let shown_at = Instant::now();
+        let expires_at = self.deadline(&n, shown_at);
         let default_action = n.default_action.clone();
         let assets = self.decode_assets(&n);
         // Promoted popups go below the stack → never the freshest; reflow reconciles.
@@ -676,6 +705,8 @@ impl Manager {
                 regions,
                 hover: None,
                 fresh: false,
+                shown_at,
+                close_pending: None,
             },
         );
         Ok(())
@@ -841,6 +872,52 @@ impl Manager {
 
     /// Begin closing a popup: start its fade-out (or tear down immediately if
     /// fading is disabled). `advance_fades` finishes faded-out popups.
+    /// Handle an app `CloseNotification` with a debounce: a visible popup gets a
+    /// pending-close timer (a re-Notify within `CLOSE_GRACE` cancels it — the
+    /// Chromium Notify→Close→Notify update churn); a hidden (overflow) one is
+    /// dropped right away.
+    fn defer_close(&mut self, id: &NotificationId) -> Result<()> {
+        if let Some(p) = self.popups.iter_mut().find(|p| &p.id == id) {
+            if !matches!(p.fade, Fade::Out(..)) {
+                p.close_pending = Some((Instant::now() + CLOSE_GRACE, reason::CLOSED_BY_CALL));
+            }
+            return Ok(());
+        }
+        if let Some(pos) = self.overflow.iter().position(|n| &n.id == id) {
+            let n = self.overflow.remove(pos);
+            if let NotificationId::Fdo(fid) = n.id {
+                self.emit(Feedback::Closed {
+                    id: fid,
+                    reason: reason::CLOSED_BY_CALL,
+                });
+            }
+            self.refresh_overflow_tile()?;
+            self.reflow()?;
+        }
+        Ok(())
+    }
+
+    /// Fire any debounced closes whose grace window has elapsed.
+    fn materialize_closes(&mut self) -> Result<()> {
+        let now = Instant::now();
+        let due: Vec<(NotificationId, u32)> = self
+            .popups
+            .iter()
+            .filter_map(|p| {
+                p.close_pending
+                    .filter(|(t, _)| *t <= now)
+                    .map(|(_, r)| (p.id.clone(), r))
+            })
+            .collect();
+        for (id, reason) in due {
+            if let Some(p) = self.popups.iter_mut().find(|p| p.id == id) {
+                p.close_pending = None;
+            }
+            self.close(&id, reason)?;
+        }
+        Ok(())
+    }
+
     fn close(&mut self, id: &NotificationId, reason: u32) -> Result<()> {
         if self.config.fade_ms == 0 {
             return self.finish_close(id, reason);
@@ -1027,12 +1104,17 @@ impl Manager {
         for id in expired {
             self.close(&id, reason::EXPIRED)?;
         }
-        // Hidden (overflow) notifications still expire on their own timers.
+        // Hidden (overflow) notifications still expire on their own timers, but
+        // anchored to receipt (they were never displayed) so stale held ones drop.
         let due: Vec<usize> = self
             .overflow
             .iter()
             .enumerate()
-            .filter(|(_, n)| self.deadline(n).map(|t| t <= now).unwrap_or(false))
+            .filter(|(_, n)| {
+                self.deadline(n, n.created)
+                    .map(|t| t <= now)
+                    .unwrap_or(false)
+            })
             .map(|(i, _)| i)
             .collect();
         if !due.is_empty() {
@@ -1169,7 +1251,8 @@ pub fn run(
                     }
                 }
                 Ok(Command::Close(id)) => {
-                    if let Err(e) = mgr.close(&id, reason::CLOSED_BY_CALL) {
+                    // Debounced: a re-Notify within the grace cancels it (Chromium churn).
+                    if let Err(e) = mgr.defer_close(&id) {
                         warn!(error = %e, "failed to close popup");
                     }
                 }
@@ -1193,6 +1276,7 @@ pub fn run(
         while let Some(event) = mgr.ui.conn.poll_for_event()? {
             mgr.handle_event(event)?;
         }
+        mgr.materialize_closes()?;
         mgr.expire_due()?;
         mgr.advance_fades()?;
         mgr.check_fullscreen()?;

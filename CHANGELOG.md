@@ -5,7 +5,17 @@ All notable changes to gnome-notistack are documented here. Format follows
 
 ## [Unreleased]
 
-## [0.1.1] - 2026-06-08
+### Fixed
+- Notifications no longer blink/flicker when an app rapidly closes and re-posts
+  the same notification (Chromium update churn — Vivaldi, Discord/Electron send
+  Notify→Close→Notify on update). A re-Notify now revives/updates the existing
+  popup instead of spawning a duplicate, an app `CloseNotification` is debounced
+  (~200 ms) so a re-Notify cancels it, and auto-expiry counts from **display
+  time** rather than D-Bus receipt — so a suppression-queued (DND/lock/fullscreen)
+  or overflow-held notification shows for its full duration instead of expiring
+  instantly.
+- Re-anchor popups when the monitor or resolution changes (not only on a config
+  change).
 
 ### Changed
 - Point the project URLs (`Cargo.toml` repository, the extension `url`, and the
